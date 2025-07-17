@@ -66,6 +66,12 @@ class PopupController {
   renderInitial() {
     const container = document.createElement('div');
     container.className = 'state-initial';
+    const openBtn = document.createElement('button');
+    openBtn.className = 'bookmark-page-btn';
+    openBtn.textContent = 'Go to Bookmarks Page';
+    openBtn.setAttribute('aria-label', 'Go to Bookmarks Page');
+    openBtn.addEventListener('click', () => this.openBookmarksPage());
+    container.appendChild(openBtn);
     const scanBtn = document.createElement('button');
     scanBtn.className = 'scan-btn';
     scanBtn.innerHTML = '<span class="icon-scan"></span>Scan Bookmarks';
@@ -306,6 +312,17 @@ class PopupController {
       document.execCommand('copy');
       document.body.removeChild(textarea);
     }
+  }
+
+  openBookmarksPage() {
+    const url = 'https://x.com/i/bookmarks';
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0]) {
+        chrome.tabs.update(tabs[0].id, { url });
+      } else {
+        chrome.tabs.create({ url });
+      }
+    });
   }
 }
 

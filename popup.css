@@ -109,6 +109,25 @@ body {
   justify-content: center;
   gap: 10px;
 }
+
+.state-initial .bookmark-page-btn {
+  margin-top: 20px;
+  width: 90%;
+  font-size: 16px;
+  font-weight: 700;
+  background: #1D9BF0;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 0;
+  box-shadow: 0 2px 8px rgba(29,155,240,0.10);
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
 .state-initial .scan-btn:disabled {
   background: #22303C;
   color: #8899A6;
