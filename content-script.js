@@ -116,7 +116,16 @@ class XBookmarkScanner {
         }
         if (!username) {
           const handleSpan = article.querySelector('div[dir="ltr"] > span');
-          if (handleSpan) username = handleSpan.textContent?.replace('@', '').trim() || '';
+          if (handleSpan) {
+            username = handleSpan.textContent?.replace('@', '').trim() || '';
+          }
+        }
+        // Fallback: derive username from tweet URL if still missing
+        if (!username && url) {
+          const match = url.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
+          if (match) {
+            username = match[1];
+          }
         }
         // Date/time
         let dateTime = '';
@@ -205,7 +214,16 @@ class XBookmarkScanner {
         }
         if (!username) {
           const handleSpan = article.querySelector('div[dir="ltr"] > span');
-          if (handleSpan) username = handleSpan.textContent?.replace('@', '').trim() || '';
+          if (handleSpan) {
+            username = handleSpan.textContent?.replace('@', '').trim() || '';
+          }
+        }
+        // Fallback: derive username from tweet URL if still missing
+        if (!username && url) {
+          const match = url.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
+          if (match) {
+            username = match[1];
+          }
         }
         let dateTime = '';
         const timeEl = article.querySelector('time');
