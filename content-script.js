@@ -5,12 +5,14 @@ class XBookmarkScanner {
   constructor() {
     this.setupMessageListener();
     console.log('[X Extractor] XBookmarkScanner initialized');
-    chrome.runtime.sendMessage({ type: 'progressUpdate', status: 'Content script initialized.' });
+    this.sendProgress('Content script initialized.');
   }
 
   async sendProgress(status) {
     try {
-      chrome.runtime.sendMessage({ type: 'progressUpdate', status });
+      chrome.runtime
+        .sendMessage({ type: 'progressUpdate', status })
+        .catch(() => {});
     } catch (e) {
       // ignore
     }
