@@ -146,6 +146,12 @@ class PopupController {
     downloadBtn.disabled = this.scannedTweets.length === 0;
     downloadBtn.addEventListener('click', () => this.downloadMarkdown());
     actions.appendChild(downloadBtn);
+    const csvBtn = document.createElement('button');
+    csvBtn.className = 'export-btn';
+    csvBtn.innerHTML = '<span class="icon-download"></span>Download .csv';
+    csvBtn.disabled = this.scannedTweets.length === 0;
+    csvBtn.addEventListener('click', () => this.downloadCSV());
+    actions.appendChild(csvBtn);
     const copyBtn = document.createElement('button');
     copyBtn.className = 'export-btn';
     copyBtn.innerHTML = '<span class="icon-copy"></span>Copy All';
@@ -279,6 +285,34 @@ class PopupController {
     return md;
   }
 
+  generateCSV() {
+    if (!this.scannedTweets.length) return '';
+    const escapeCSV = (val) => {
+      if (val === undefined || val === null) return '';
+      const str = String(val).replace(/\n/g, ' ');
+      if (/[",]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+    let csv = 'Author,Username,Date,Text,Likes,Retweets,Replies,Views,Link\n';
+    this.scannedTweets.forEach(t => {
+      const row = [
+        escapeCSV(t.displayName || ''),
+        escapeCSV('@' + (t.username || '')),
+        escapeCSV(t.dateTime || ''),
+        escapeCSV(t.text || ''),
+        escapeCSV(t.likes || ''),
+        escapeCSV(t.retweets || ''),
+        escapeCSV(t.replies || ''),
+        escapeCSV(t.views || ''),
+        escapeCSV(t.url)
+      ].join(',');
+      csv += row + '\n';
+    });
+    return csv;
+  }
+
   downloadMarkdown() {
     const md = this.generateMarkdown();
     if (!md) return;
@@ -287,6 +321,20 @@ class PopupController {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'x-bookmarks.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  downloadCSV() {
+    const csv = this.generateCSV();
+    if (!csv) return;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'x-bookmarks.csv';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
