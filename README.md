@@ -37,7 +37,7 @@ Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—
 ## 📖 How to Use
 
 1. **Go to Bookmarks Page**
-   - Click the "Go to Bookmarks Page" button in the popup to open your X Bookmarks.
+   - Click the "Go to Bookmarks Page" button in the popup. It opens `https://x.com/i/bookmarks` in your current tab (or a new one if needed).
 2. **Scan Bookmarks**
    - Make sure you're on the X Bookmarks page (`https://x.com/i/bookmarks`).
    - Click "Scan Bookmarks" to extract all tweet URLs currently loaded on the page.
