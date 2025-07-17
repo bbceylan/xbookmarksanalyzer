@@ -1,14 +1,22 @@
-// X Bookmarks Extractor Popup Script
+// X Bookmarks Extractor Popup Script v0.5.0
 
-class BookmarksController {
+document.addEventListener('DOMContentLoaded', () => {
+  const popup = new PopupController();
+});
+
+class PopupController {
   constructor() {
     this.initializeState();
     this.bindElements();
     this.setupEventListeners();
-    this.loadSettings().then(() => this.loadLastExtraction());
+    this.setupFooter();
+    this.loadSettings().then(() => {
+      this.loadLastExtraction();
+      this.render();
+    });
   }
 
-  initializeState() {
+  initializeState = () => {
     this.state = {
       lastExtraction: null,
       isDarkMode: false,
@@ -24,9 +32,9 @@ class BookmarksController {
       SCROLL_DELAY: 1000,
       MAX_SAFE_BOOKMARKS: 500
     };
-  }
+  };
 
-  bindElements() {
+  bindElements = () => {
     this.elements = {
       statusBar: document.getElementById('status-bar'),
       extractionStatus: document.getElementById('extraction-status'),
@@ -41,32 +49,32 @@ class BookmarksController {
     };
   }
 
-  async loadSettings() {
+  loadSettings = async () => {
     const settings = await chrome.storage.local.get('settings');
     if (settings.settings) {
       this.state.isDarkMode = settings.settings.darkMode || false;
       this.updateTheme();
     }
-  }
+  };
 
-  async saveSettings() {
+  saveSettings = async () => {
     await chrome.storage.local.set({
       settings: {
         darkMode: this.state.isDarkMode
       }
     });
-  }
+  };
 
-  async loadLastExtraction() {
+  loadLastExtraction = async () => {
     const result = await chrome.storage.local.get('lastExtraction');
     if (result.lastExtraction) {
       this.state.lastExtraction = result.lastExtraction.bookmarks;
       this.updateExtractionStatus(result.lastExtraction.timestamp);
       this.updateUI();
     }
-  }
+  };
 
-  setupEventListeners() {
+  setupEventListeners = () => {
     this.elements.darkModeToggle.addEventListener('change', e => this.handleDarkModeToggle(e));
     this.elements.clearStorageBtn.addEventListener('click', () => this.handleClearStorage());
     this.elements.scanBtn.addEventListener('click', () => this.handleScan());
@@ -79,20 +87,20 @@ class BookmarksController {
         this.handleScanComplete(msg.bookmarks);
       }
     });
-  }
+  };
 
-  updateUI() {
+  updateUI = () => {
     this.updateExportButtons();
     this.updateProgressBar();
-  }
+  };
 
-  updateExportButtons() {
+  updateExportButtons = () => {
     this.elements.exportButtons.forEach(button => {
       button.disabled = !this.state.lastExtraction;
     });
-  }
+  };
 
-  updateProgressBar() {
+  updateProgressBar = () => {
     const { current, total } = this.state.progress;
     if (total > 0) {
       const percent = (current / total) * 100;
@@ -102,18 +110,18 @@ class BookmarksController {
     } else {
       this.elements.progressBar.style.display = 'none';
     }
-  }
+  };
 
-  updateTheme() {
+  updateTheme = () => {
     document.body.setAttribute('data-theme', this.state.isDarkMode ? 'dark' : 'light');
-  }
+  };
 
-  updateStatus(message) {
+  updateStatus = (message) => {
     this.elements.statusBar.textContent = message;
     this.elements.statusBar.setAttribute('aria-label', message);
-  }
+  };
 
-  updateExtractionStatus(timestamp) {
+  updateExtractionStatus = (timestamp) => {
     if (!this.state.lastExtraction) {
       this.elements.extractionStatus.textContent = '';
       return;
@@ -123,28 +131,28 @@ class BookmarksController {
     const minutes = Math.floor(age / 60000);
     this.elements.extractionStatus.textContent = 
       `${this.state.lastExtraction.length} bookmarks from ${minutes} minutes ago`;
-  }
+  };
 
   // Event Handlers
-  async handleDarkModeToggle(event) {
+  handleDarkModeToggle = async (event) => {
     this.state.isDarkMode = event.target.checked;
     this.updateTheme();
     await this.saveSettings();
-  }
+  };
 
-  async handleClearStorage() {
+  handleClearStorage = async () => {
     this.state.lastExtraction = null;
     await chrome.storage.local.remove('lastExtraction');
     this.updateStatus('Stored bookmarks cleared');
     this.updateUI();
-  }
+  };
 
-  handleProgressUpdate(progress) {
+  handleProgressUpdate = (progress) => {
     this.state.progress = progress;
     this.updateUI();
-  }
+  };
 
-  async handleScanComplete(bookmarks) {
+  handleScanComplete = async (bookmarks) => {
     this.state.lastExtraction = bookmarks;
     await chrome.storage.local.set({
       lastExtraction: {
@@ -159,9 +167,9 @@ class BookmarksController {
     }
     
     this.updateUI();
-  }
+  };
 
-  async handleScan() {
+  handleScan = () => {
     this.updateStatus('Scanning bookmarks...');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
       chrome.tabs.sendMessage(tabs[0].id, {
@@ -169,9 +177,9 @@ class BookmarksController {
         options: { batchSize: this.constants.BATCH_SIZE }
       });
     });
-  }
+  };
 
-  async handleAutoScroll() {
+  handleAutoScroll = () => {
     this.updateStatus('Auto-scrolling and scanning...');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
       chrome.tabs.sendMessage(tabs[0].id, {
@@ -182,18 +190,9 @@ class BookmarksController {
         }
       });
     });
-  }
-}
+  };
 
-// Initialize controller when popup loads
-document.addEventListener('DOMContentLoaded', () => {
-  const controller = new BookmarksController();
-});
-
-class PopupController {
   constructor() {
-    // State
-    this.state = 'initial';
     this.scannedTweets = [];
     this.lastExtraction = null;
     this.isDarkMode = false;
@@ -226,31 +225,31 @@ class PopupController {
   }
 
   // Storage Management
-  async loadSettings() {
+  loadSettings = async () => {
     const settings = await chrome.storage.local.get('settings');
     if (settings.settings) {
       this.isDarkMode = settings.settings.darkMode || false;
       this.updateTheme();
     }
-  }
+  };
 
-  async saveSettings() {
+  saveSettings = async () => {
     await chrome.storage.local.set({
       settings: {
         darkMode: this.isDarkMode
       }
     });
-  }
+  };
 
-  async loadLastExtraction() {
+  loadLastExtraction = async () => {
     const result = await chrome.storage.local.get('lastExtraction');
     if (result.lastExtraction) {
       this.lastExtraction = result.lastExtraction.bookmarks;
       this.updateExtractionStatus(result.lastExtraction.timestamp);
     }
-  }
+  };
 
-  setupFooter() {
+  setupFooter = () => {
     this.rescanLink.addEventListener('click', (e) => {
       e.preventDefault();
       this.setState('initial');
@@ -262,36 +261,36 @@ class PopupController {
     this.closeBtn.addEventListener('click', () => {
       window.close();
     });
-  }
+  };
 
   // UI Updates
-  updateUI() {
+  updateUI = () => {
     this.updateExportButtons();
     this.updateProgressBar();
     this.updateTheme();
-  }
+  };
 
-  updateExportButtons() {
+  updateExportButtons = () => {
     const exportButtons = document.querySelectorAll('.export-button');
     exportButtons.forEach(button => {
       button.disabled = !this.lastExtraction;
     });
-  }
+  };
 
-  updateProgressBar() {
+  updateProgressBar = () => {
     if (this.progress.total > 0) {
       const percent = (this.progress.current / this.progress.total) * 100;
       this.progressBar.style.width = `${percent}%`;
       this.progressText.textContent = `${this.progress.current} / ${this.progress.total} bookmarks`;
       this.progressBar.setAttribute('aria-valuenow', percent);
     }
-  }
+  };
 
-  updateTheme() {
+  updateTheme = () => {
     document.body.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light');
-  }
+  };
 
-  updateExtractionStatus(timestamp) {
+  updateExtractionStatus = (timestamp) => {
     if (!this.lastExtraction) {
       this.extractionStatus.textContent = '';
       return;
@@ -301,28 +300,28 @@ class PopupController {
     const minutes = Math.floor(age / 60000);
     this.extractionStatus.textContent = 
       `${this.lastExtraction.length} bookmarks from ${minutes} minutes ago`;
-  }
+  };
 
-  updateStatus(message) {
+  updateStatus = (message) => {
     this.statusBar.textContent = message;
     this.statusBar.setAttribute('aria-label', message);
-  }
+  };
 
   // Event Handlers
-  async handleDarkModeToggle(event) {
+  handleDarkModeToggle = async (event) => {
     this.isDarkMode = event.target.checked;
     this.updateTheme();
     await this.saveSettings();
-  }
+  };
 
-  async handleClearStorage() {
+  handleClearStorage = async () => {
     this.lastExtraction = null;
     await chrome.storage.local.remove('lastExtraction');
     this.updateStatus('Stored bookmarks cleared');
     this.updateUI();
-  }
+  };
 
-  async handleScanComplete(bookmarks) {
+  handleScanComplete = async (bookmarks) => {
     this.lastExtraction = bookmarks;
     await chrome.storage.local.set({
       lastExtraction: {
@@ -337,10 +336,10 @@ class PopupController {
     }
     
     this.updateUI();
-  }
+  };
 
   // Event Listeners
-  setupEventListeners() {
+  setupEventListeners = () => {
     this.darkModeToggle.addEventListener('change', this.handleDarkModeToggle.bind(this));
     this.clearStorageBtn.addEventListener('click', this.handleClearStorage.bind(this));
     
@@ -353,11 +352,11 @@ class PopupController {
         this.handleScanComplete(msg.bookmarks);
       }
     });
-  }
+    
     this.render();
-  }
+  };
 
-  render() {
+  render = () => {
     this.mainContent.innerHTML = '';
     this.rescanLink.style.display = this.state === 'complete' ? '' : 'none';
     if (this.state === 'initial') {
@@ -367,9 +366,9 @@ class PopupController {
     } else if (this.state === 'complete') {
       this.renderComplete();
     }
-  }
+  };
 
-  renderInitial() {
+  renderInitial = () => {
     const container = document.createElement('div');
     container.className = 'state-initial';
     const openBtn = document.createElement('button');
@@ -409,9 +408,9 @@ class PopupController {
     settings.appendChild(label);
     container.appendChild(settings);
     this.mainContent.appendChild(container);
-  }
+  };
 
-  renderScanning() {
+  renderScanning = () => {
     const container = document.createElement('div');
     container.className = 'state-scanning';
     const scanBtn = document.createElement('button');
@@ -430,9 +429,9 @@ class PopupController {
     progress.style.fontSize = '15px';
     container.appendChild(progress);
     this.mainContent.appendChild(container);
-  }
+  };
 
-  renderComplete() {
+  renderComplete = () => {
     const container = document.createElement('div');
     container.className = 'state-complete';
     const status = document.createElement('div');
@@ -508,27 +507,27 @@ class PopupController {
     this.mainContent.appendChild(container);
   }
 
-  startScan() {
+  startScan = () => {
     this.progress = 'Initializing...';
     this.setState('scanning');
     setTimeout(() => {
       this.doScan();
     }, 400);
-  }
+  };
 
-  doScan() {
+  doScan = () => {
     if (this.autoScroll) {
       this.aggressiveAutoScrollAndScan();
     } else {
       this.basicScan();
     }
-  }
+  };
 
-  basicScan() {
+  basicScan = () => {
     this.sendScanMessage();
-  }
+  };
 
-  aggressiveAutoScrollAndScan() {
+  aggressiveAutoScrollAndScan = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs || !tabs[0]) {
         this.setState('initial');
@@ -567,7 +566,7 @@ class PopupController {
     });
   }
 
-  sendScanMessage() {
+  sendScanMessage = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs || !tabs[0]) {
         this.setState('initial');
@@ -576,44 +575,33 @@ class PopupController {
       }
       chrome.tabs.sendMessage(
         tabs[0].id,
-        { action: 'getPageInfo' },
-        (pageInfo) => {
-          if (!pageInfo || !pageInfo.isBookmarksPage) {
+        { command: 'startScanning' },
+        (response) => {
+          if (chrome.runtime.lastError) {
             this.setState('initial');
-            alert('Please open your X Bookmarks page.');
+            alert('Could not connect to the page. Refresh and try again.');
             return;
           }
-          chrome.tabs.sendMessage(
-            tabs[0].id,
-            { action: 'scanBookmarksWithFallback' },
-            (response) => {
-              if (chrome.runtime.lastError) {
-                this.setState('initial');
-                alert('Could not connect to the page. Refresh and try again.');
-                return;
-              }
-              if (response && response.success && Array.isArray(response.tweets)) {
-                // Check for missing metadata
-                const incomplete = response.tweets.some(t => !t.text || !t.username);
-                let warning = '';
-                if (incomplete) {
-                  warning = 'Some bookmarks could not be fully extracted. Try scrolling manually and scanning again.';
-                } else if (response.tweets.length < 10) {
-                  warning = 'Warning: Only ' + response.tweets.length + ' items found. Try scrolling manually and scan again.';
-                }
-                this.setState('complete', response.tweets, warning);
-              } else {
-                this.setState('initial');
-                alert('Failed to scan. Make sure you are on the X Bookmarks page.');
-              }
+          if (response && response.success && Array.isArray(response.tweets)) {
+            // Check for missing metadata
+            const incomplete = response.tweets.some(t => !t.text || !t.username);
+            let warning = '';
+            if (incomplete) {
+              warning = 'Some bookmarks could not be fully extracted. Try scrolling manually and scanning again.';
+            } else if (response.tweets.length < 10) {
+              warning = 'Warning: Only ' + response.tweets.length + ' items found. Try scrolling manually and scan again.';
             }
-          );
+            this.setState('complete', response.tweets, warning);
+          } else {
+            this.setState('initial');
+            alert('Failed to scan. Make sure you are on the X Bookmarks page.');
+          }
         }
       );
     });
-  }
+  };
 
-  generateMarkdown() {
+  generateMarkdown = () => {
     if (!this.scannedTweets.length) return '';
     let md = `| Author | Username | Date | Text | Likes | Retweets | Replies | Views | Link |\n`;
     md += `|--------|----------|------|------|-------|----------|---------|-------|------|\n`;
@@ -622,9 +610,9 @@ class PopupController {
       md += `| ${t.displayName || ''} | @${t.username || ''} | ${t.dateTime || ''} | ${safeText} | ${t.likes || ''} | ${t.retweets || ''} | ${t.replies || ''} | ${t.views || ''} | [Link](${t.url}) |\n`;
     });
     return md;
-  }
+  };
 
-  generateCSV() {
+  generateCSV = () => {
     if (!this.scannedTweets.length) return '';
     const escapeCSV = (val) => {
       if (val === undefined || val === null) return '';
@@ -652,7 +640,7 @@ class PopupController {
     return csv;
   }
 
-  downloadMarkdown() {
+  downloadMarkdown = () => {
     const md = this.generateMarkdown();
     if (!md) return;
     const blob = new Blob([md], { type: 'text/markdown' });
@@ -664,9 +652,9 @@ class PopupController {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
+  };
 
-  downloadCSV() {
+  downloadCSV = () => {
     const csv = this.generateCSV();
     if (!csv) return;
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -678,9 +666,9 @@ class PopupController {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
+  };
 
-  copyToClipboard() {
+  copyToClipboard = () => {
     const md = this.generateMarkdown();
     if (!md) return;
     if (navigator.clipboard) {
@@ -693,9 +681,9 @@ class PopupController {
       document.execCommand('copy');
       document.body.removeChild(textarea);
     }
-  }
+  };
 
-  openBookmarksPage() {
+  openBookmarksPage = () => {
     const url = 'https://x.com/i/bookmarks';
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs && tabs[0]) {
@@ -704,7 +692,10 @@ class PopupController {
         chrome.tabs.create({ url });
       }
     });
-  }
+  };
 }
 
-new PopupController();
+// Initialize the popup controller when the DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  new PopupController();
+});
