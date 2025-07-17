@@ -175,6 +175,24 @@ class PopupController {
       });
     }
     container.appendChild(resultsList);
+
+    const mdToggleBtn = document.createElement('button');
+    mdToggleBtn.className = 'markdown-toggle-btn';
+    mdToggleBtn.textContent = 'Show Markdown';
+    const mdArea = document.createElement('textarea');
+    mdArea.className = 'markdown-output';
+    mdArea.value = this.generateMarkdown();
+    mdArea.readOnly = true;
+    mdArea.style.display = 'none';
+    mdArea.addEventListener('focus', () => mdArea.select());
+    mdToggleBtn.addEventListener('click', () => {
+      const isHidden = mdArea.style.display === 'none';
+      mdArea.style.display = isHidden ? 'block' : 'none';
+      mdToggleBtn.textContent = isHidden ? 'Hide Markdown' : 'Show Markdown';
+    });
+    container.appendChild(mdToggleBtn);
+    container.appendChild(mdArea);
+
     this.mainContent.appendChild(container);
   }
 

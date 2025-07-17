@@ -265,6 +265,32 @@ body {
   border-bottom: none;
 }
 
+.state-complete .markdown-toggle-btn {
+  margin: 16px 0 0 0;
+  width: 90%;
+  background: #22303C;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 15px;
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.state-complete .markdown-output {
+  width: 90%;
+  margin-top: 8px;
+  height: 120px;
+  background: #192734;
+  color: #fff;
+  border: 1px solid #22303C;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 13px;
+  padding: 8px;
+  resize: vertical;
+}
+
 .footer {
   padding: 12px 20px;
   background: #15202B;
