@@ -1,18 +1,22 @@
-# X Bookmark Analyzer - Browser Extension
+# X Bookmarks Extractor - Browser Extension
 
-Transform your X/Twitter bookmarks into organized knowledge with AI-powered analysis.
+Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—just simple, robust, and accessible bookmark extraction.
 
 ## 🚀 Features
 
-- **Smart Scanning**: Automatically detects bookmark URLs from X.com pages
-- **AI-Powered Analysis**: Uses Claude AI to generate topics, summaries, and hashtags
-- **Organized Export**: Export results as structured Markdown files
-- **Privacy First**: All processing happens locally, data never leaves your browser
-- **Manual Trigger**: User-controlled scanning, no automatic background activity
+- **Go to Bookmarks Page**: Quickly open your X/Twitter bookmarks page.
+- **Scan Bookmarks**: Extract all tweet URLs from your X Bookmarks page with one click.
+- **Auto-Scroll & Scan All**: Automatically scrolls your bookmarks page to load and extract all bookmarks, even for large accounts.
+- **Download as Markdown**: Export your bookmarks as a clean Markdown list for easy reference or note-taking.
+- **Copy to Clipboard**: Instantly copy your bookmarks in Markdown format to your clipboard, with a robust fallback if permissions are denied.
+- **Status Bar Feedback**: All actions provide clear, accessible feedback at the top of the popup—no intrusive popups.
+- **Accessibility First**: Full keyboard navigation, ARIA labels, visible focus outlines, and screen reader support.
+- **Large Bookmark Set Warning**: If you have more than 500 bookmarks, you'll be warned to consider exporting in batches.
+- **Privacy First**: No data leaves your browser. No API keys, no external servers, no analysis—just your bookmarks.
 
 ## 📦 Installation
 
-### Option 1: Load Unpacked Extension (Recommended for Development)
+### Load Unpacked Extension
 
 1. **Download Files**: Save all the extension files to a folder:
    - `manifest.json`
@@ -21,165 +25,77 @@ Transform your X/Twitter bookmarks into organized knowledge with AI-powered anal
    - `popup.html`
    - `popup.js`
    - `popup.css`
-   - `options.html`
-   - `options.js`
+   - `icons/` (with icon PNGs)
 
-2. **Create Icons Folder**: Create an `icons/` folder and add extension icons:
-   - `icon16.png` (16x16)
-   - `icon32.png` (32x32)
-   - `icon48.png` (48x48)
-   - `icon128.png` (128x128)
-
-3. **Load in Chrome**:
+2. **Load in Chrome**:
    - Open Chrome and go to `chrome://extensions/`
-   - Enable "Developer mode" (top right toggle)
+   - Enable "Developer mode"
    - Click "Load unpacked"
    - Select your extension folder
 
-4. **Configure API Key**:
-   - Click the extension icon
-   - Go to Settings
-   - Enter your Claude API key from [Anthropic Console](https://console.anthropic.com/)
-
-### Option 2: Chrome Web Store (Future)
-*Coming soon - the extension will be published to the Chrome Web Store*
-
-## 🔑 API Key Setup
-
-1. **Get Claude API Key**:
-   - Visit [Anthropic Console](https://console.anthropic.com/)
-   - Create an account or sign in
-   - Generate a new API key
-   - Copy the key (starts with `sk-ant-api`)
-
-2. **Configure Extension**:
-   - Right-click the extension icon → Options
-   - Paste your API key in the "Claude API Key" field
-   - Click "Test API Connection" to verify
-   - Save settings
-
 ## 📖 How to Use
 
-### Step 1: Navigate to X Bookmarks
-- Go to [x.com/i/bookmarks](https://x.com/i/bookmarks)
-- Make sure you're logged in and can see your bookmarks
-
-### Step 2: Scan Bookmarks
-- Click the extension icon (📊) in your browser toolbar
-- The extension will detect you're on the bookmarks page
-- Click "Scan Current Page" to automatically extract bookmark URLs
-- Or manually paste bookmark URLs in the text area
-
-### Step 3: Analyze with AI
-- Click "Analyze Bookmarks" to process URLs with Claude AI
-- Wait for analysis to complete (progress bar will show status)
-- Each bookmark gets categorized with topics, summaries, and hashtags
-
-### Step 4: Export Results
-- Click "Export MD" to download a Markdown file
-- Results are organized by topic with clean formatting
-- Use the file for reference, note-taking, or further processing
-
-## ⚙️ Settings
-
-Access settings by clicking the gear icon or going to Extension Options:
-
-### API Configuration
-- **Claude API Key**: Your Anthropic API key
-- **Show API Key**: Toggle to reveal/hide the key
-
-### Analysis Settings
-- **Max Bookmarks**: Limit bookmarks per analysis (25-200)
-- **Request Delay**: Time between API calls to avoid rate limiting
-- **Auto Export**: Automatically download results after analysis
-- **Group by Topic**: Organize exports by AI-generated topics
-
-### Export Settings
-- **Export Format**: Choose Markdown, JSON, or CSV
-- **Filename Pattern**: Customize output filename with variables
+1. **Go to Bookmarks Page**
+   - Click the "Go to Bookmarks Page" button in the popup to open your X Bookmarks.
+2. **Scan Bookmarks**
+   - Make sure you're on the X Bookmarks page (`https://x.com/i/bookmarks`).
+   - Click "Scan Bookmarks" to extract all tweet URLs currently loaded on the page.
+3. **Auto-Scroll & Scan All**
+   - For large accounts, click "Auto-Scroll & Scan All" to automatically scroll and load all bookmarks, then extract them.
+4. **Export or Copy**
+   - Click "Download .md" to save your bookmarks as a Markdown file.
+   - Or click "Copy to Clipboard" to copy the Markdown list for pasting anywhere. If clipboard permissions are denied, the extension will select the text for you to copy manually.
 
 ## 🛠️ Development
 
 ### Project Structure
 ```
-x-bookmark-analyzer-extension/
+x-bookmarks-extractor-extension/
 ├── manifest.json          # Extension configuration
-├── background.js          # Service worker for API calls
+├── background.js          # (Minimal stub, not used)
 ├── content-script.js      # X.com page scanning
-├── popup.html            # Main interface
-├── popup.js              # Popup functionality
-├── popup.css             # Popup styling
-├── options.html          # Settings page
-├── options.js            # Settings functionality
-├── icons/                # Extension icons
+├── popup.html             # Main interface
+├── popup.js               # Popup functionality
+├── popup.css              # Popup styling
+├── icons/                 # Extension icons
 │   ├── icon16.png
 │   ├── icon32.png
 │   ├── icon48.png
 │   └── icon128.png
-└── README.md             # This file
+└── README.md              # This file
 ```
 
 ### Key Technologies
 - **Manifest V3**: Latest Chrome extension standard
-- **Claude API**: Anthropic's AI for content analysis
-- **Chrome Storage API**: Secure settings and statistics storage
-- **Chrome Tabs API**: Page detection and messaging
+- **Chrome Tabs & Scripting API**: Page detection, messaging, and auto-scroll
+- **Accessibility**: ARIA, keyboard navigation, focus management
 
 ### Architecture
 1. **Content Script**: Scans X.com pages for bookmark URLs
-2. **Background Service**: Handles Claude API calls and content fetching
-3. **Popup Interface**: Main user interaction and results display
-4. **Options Page**: Settings and configuration management
+2. **Popup Interface**: Main user interaction and results display
 
 ## 🔒 Privacy & Security
 
-- **Local Processing**: All bookmark analysis happens in your browser
-- **Secure Storage**: API keys stored using Chrome's encrypted storage
+- **Local Processing**: All bookmark extraction happens in your browser
 - **No Data Collection**: Extension doesn't collect or transmit personal data
-- **User Control**: Manual trigger means you control when scanning happens
-- **API Communication**: Only your browser communicates with Claude API
+- **No API Keys**: No configuration or external services required
+- **Minimal Permissions**: Only `tabs`, `activeTab`, `clipboardWrite`, and `scripting` are used
 
 ## 🐛 Troubleshooting
 
-### Extension Not Working
-- Refresh the X.com page
-- Check if you're on the correct bookmarks page
-- Verify API key is configured correctly
-- Look for errors in browser console
+- Make sure you are on the X Bookmarks page (`https://x.com/i/bookmarks`) when scanning.
+- If scanning fails, refresh the page and try again.
+- If you see no results, scroll down to load more bookmarks or use "Auto-Scroll & Scan All".
+- If clipboard copy fails, the extension will select the text for you—just press `Ctrl+C` or `Cmd+C` to copy manually.
+- If you have more than 500 bookmarks, consider exporting in batches for best performance.
+- All errors and statuses are shown in the status bar at the top of the popup.
 
-### Scanning Issues
-- Make sure you're logged into X.com
-- Try scrolling down to load more bookmarks
-- Check that bookmarks are visible on the page
-- Reload the extension if needed
+## ♿ Accessibility
 
-### Analysis Fails
-- Verify API key with "Test Connection" button
-- Check your Anthropic account has available credits
-- Reduce the number of bookmarks being analyzed
-- Increase delay between requests in settings
-
-### Rate Limiting
-- Increase delay between requests (2-5 seconds)
-- Reduce max bookmarks per batch
-- Wait before running another analysis
-
-## 💡 Tips & Best Practices
-
-1. **Start Small**: Test with 10-25 bookmarks first
-2. **Use Delays**: Set 1-2 second delays to avoid rate limiting
-3. **Organize Results**: Enable "Group by Topic" for better organization
-4. **Regular Exports**: Export results frequently to avoid losing work
-5. **Monitor API Usage**: Keep track of your Anthropic API credits
-
-## 🎯 Future Enhancements
-
-- Chrome Web Store publication
-- Support for more AI providers (OpenAI, Google)
-- Integration with note-taking apps (Notion, Obsidian)
-- Duplicate bookmark detection
-- Bulk operations and scheduling
-- Advanced filtering and search
+- All buttons and textareas are keyboard accessible and have ARIA labels.
+- Status bar uses `role=status` and `aria-live` for screen readers.
+- Focus outlines are strong and visible.
+- Logical tab order for all interactive elements.
 
 ## 📝 License
 
@@ -193,12 +109,6 @@ MIT License - feel free to modify and distribute
 4. Test thoroughly
 5. Submit a pull request
 
-## 📞 Support
-
-- **Issues**: Report bugs and request features
-- **API Support**: [Anthropic Documentation](https://docs.anthropic.com/)
-- **Chrome Extensions**: [Developer Guide](https://developer.chrome.com/docs/extensions/)
-
 ---
 
-**Transform your X bookmarks into organized knowledge! 🚀**
+**Extract and export your X bookmarks with ease, accessibility, and privacy!**

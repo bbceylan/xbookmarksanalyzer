@@ -1,476 +1,270 @@
-// Content script for X/Twitter bookmark scanning
-console.log('X Bookmark Analyzer: Content script loaded');
+// Content script for X Bookmarks Extractor
+console.log('X Bookmarks Extractor: Content script loaded');
 
 class XBookmarkScanner {
   constructor() {
-    this.scannedUrls = new Set();
-    this.observers = new Set();
-    this.debounceTimers = new Map();
-    this.isScanning = false;
     this.setupMessageListener();
-    this.setupCleanup();
+    console.log('[X Extractor] XBookmarkScanner initialized');
+    chrome.runtime.sendMessage({ type: 'progressUpdate', status: 'Content script initialized.' });
+  }
+
+  async sendProgress(status) {
+    try {
+      chrome.runtime.sendMessage({ type: 'progressUpdate', status });
+    } catch (e) {
+      // ignore
+    }
   }
 
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === 'scanBookmarks') {
-        this.debouncedScan().then(urls => {
-          sendResponse({ urls, success: true });
-        }).catch(error => {
-          console.error('Scanning error:', error);
-          sendResponse({ urls: [], success: false, error: this.sanitizeError(error.message) });
-        });
-        return true; // Keep message channel open for async response
-      }
-      
-      if (request.action === 'getPageInfo') {
-        sendResponse({
-          url: this.sanitizeUrl(window.location.href),
-          title: this.sanitizeText(document.title),
-          isBookmarksPage: this.isBookmarksPage()
-        });
-      }
-    });
-
-    // Add handler for HTML parsing from background
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === 'parseHtmlContent' && request.html) {
-        try {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(request.html, 'text/html');
-          let content = '';
-          // Try to extract tweet text using the latest selector
-          const tweetTextEls = doc.querySelectorAll('[data-testid="tweetText"]');
-          if (tweetTextEls.length > 0) {
-            tweetTextEls.forEach(el => {
-              content += (el.textContent?.trim() || '') + ' ';
-            });
-            content = content.trim();
-          }
-          // Fallback to previous logic if no tweet text found
-          if (!content) {
-            const selectors = [
-              'meta[property="og:title"]',
-              'meta[property="og:description"]',
-              'meta[name="description"]',
-              'title',
-              'h1',
-              'h2',
-              '.tweet-text'
-            ];
-            for (const selector of selectors) {
-              const element = doc.querySelector(selector);
-              if (element) {
-                const text = element.getAttribute('content') || element.textContent;
-                if (text && text.trim()) {
-                  content += text.trim() + ' ';
-                }
-              }
-            }
-          }
-          if (!content.trim()) {
-            const title = doc.querySelector('title');
-            content = title ? title.textContent : 'No content available';
-          }
-          console.log('[Content Script] Extracted content for Gemini:', content.trim().slice(0, 1000));
-          sendResponse({ content: content.trim().slice(0, 1000), success: true });
-        } catch (e) {
-          sendResponse({ content: '', success: false, error: e.message });
-        }
-        return true;
-      }
-    });
-
-    // Add handler for extracting tweet content for a given URL from the DOM
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === 'extractTweetContent' && request.url) {
-        try {
-          // Find the tweet/article element matching the URL
-          let tweetText = '';
-          // Try to find an article with a link to the tweet URL
-          const articles = document.querySelectorAll('article');
-          for (const article of articles) {
-            const link = article.querySelector('a[href*="/status/"]');
-            if (link && link.href && link.href.includes(request.url)) {
-              // Extract tweet text from this article
-              const tweetTextEls = article.querySelectorAll('[data-testid="tweetText"]');
-              tweetTextEls.forEach(el => {
-                tweetText += (el.textContent?.trim() || '') + ' ';
-              });
-              tweetText = tweetText.trim();
-              break;
-            }
-          }
-          // Fallback: try to find any tweetText element matching the URL
-          if (!tweetText) {
-            const allLinks = document.querySelectorAll('a[href*="/status/"]');
-            for (const link of allLinks) {
-              if (link.href && link.href.includes(request.url)) {
-                const parent = link.closest('article');
-                if (parent) {
-                  const tweetTextEls = parent.querySelectorAll('[data-testid="tweetText"]');
-                  tweetTextEls.forEach(el => {
-                    tweetText += (el.textContent?.trim() || '') + ' ';
-                  });
-                  tweetText = tweetText.trim();
-                  break;
-                }
-              }
-            }
-          }
-          // Fallback: just use the first tweetText on the page
-          if (!tweetText) {
-            const tweetTextEls = document.querySelectorAll('[data-testid="tweetText"]');
-            tweetTextEls.forEach(el => {
-              tweetText += (el.textContent?.trim() || '') + ' ';
-            });
-            tweetText = tweetText.trim();
-          }
-          if (!tweetText) {
-            tweetText = 'No tweet text found.';
-          }
-          console.log('[Content Script] Extracted tweet text for', request.url, ':', tweetText);
-          sendResponse({ content: tweetText, success: true });
-        } catch (e) {
-          sendResponse({ content: '', success: false, error: e.message });
-        }
-        return true;
-      }
-    });
-  }
-
-  setupCleanup() {
-    // Clean up on page unload
-    window.addEventListener('beforeunload', () => {
-      this.cleanup();
-    });
-
-    // Clean up on navigation (SPA)
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-    
-    history.pushState = (...args) => {
-      this.cleanup();
-      return originalPushState.apply(history, args);
-    };
-    
-    history.replaceState = (...args) => {
-      this.cleanup();
-      return originalReplaceState.apply(history, args);
-    };
-
-    window.addEventListener('popstate', () => {
-      this.cleanup();
-    });
-  }
-
-  cleanup() {
-    // Disconnect all observers
-    this.observers.forEach(observer => {
       try {
-        observer.disconnect();
-      } catch (e) {
-        console.warn('Observer cleanup failed:', e);
-      }
-    });
-    this.observers.clear();
-
-    // Clear debounce timers
-    this.debounceTimers.forEach(timer => clearTimeout(timer));
-    this.debounceTimers.clear();
-
-    this.isScanning = false;
-  }
-
-  debouncedScan() {
-    return new Promise((resolve, reject) => {
-      const timerId = 'scan';
-      
-      // Clear existing timer
-      if (this.debounceTimers.has(timerId)) {
-        clearTimeout(this.debounceTimers.get(timerId));
-      }
-
-      // Set new timer
-      const timer = setTimeout(async () => {
-        try {
-          this.debounceTimers.delete(timerId);
-          const urls = await this.scanCurrentPage();
-          resolve(urls);
-        } catch (error) {
-          reject(error);
+        console.log('[X Extractor] Received message:', request);
+        if (request.action === 'scanBookmarksWithFallback') {
+          this.sendProgress('Starting extraction...');
+          this.scanCurrentPageWithFallback().then(({tweets, debugUrls}) => {
+            this.sendProgress('Extraction complete.');
+            console.log('[X Extractor] scanCurrentPageWithFallback complete:', tweets.length, 'tweets');
+            sendResponse({ tweets, debugUrls, success: true });
+          }).catch(error => {
+            this.sendProgress('Extraction failed.');
+            console.error('[X Extractor] Scanning error (fallback):', error);
+            sendResponse({ tweets: [], debugUrls: [], success: false, error: error.message });
+          });
+          return true;
         }
-      }, 300); // 300ms debounce
-
-      this.debounceTimers.set(timerId, timer);
+        if (request.action === 'scanBookmarks') {
+          this.sendProgress('Starting extraction...');
+          this.scanCurrentPage().then(tweets => {
+            this.sendProgress('Extraction complete.');
+            console.log('[X Extractor] scanCurrentPage complete:', tweets.length, 'tweets');
+            sendResponse({ tweets, success: true });
+          }).catch(error => {
+            this.sendProgress('Extraction failed.');
+            console.error('[X Extractor] Scanning error:', error);
+            sendResponse({ tweets: [], success: false, error: error.message });
+          });
+          return true;
+        }
+        if (request.action === 'getPageInfo') {
+          const info = {
+            url: window.location.href,
+            title: document.title,
+            isBookmarksPage: this.isBookmarksPage()
+          };
+          this.sendProgress('Checking if this is the bookmarks page...');
+          console.log('[X Extractor] getPageInfo:', info);
+          sendResponse(info);
+        }
+      } catch (err) {
+        this.sendProgress('Error in message listener.');
+        console.error('[X Extractor] Message listener error:', err);
+        sendResponse({ success: false, error: err.message });
+      }
     });
   }
 
   isBookmarksPage() {
-    const url = window.location.href;
-    return url.includes('/i/bookmarks') || 
-           url.includes('/bookmarks') || 
-           document.title.toLowerCase().includes('bookmark');
+    const isBookmarks = window.location.href.includes('/i/bookmarks');
+    this.sendProgress(isBookmarks ? 'On bookmarks page.' : 'Not on bookmarks page.');
+    console.log('[X Extractor] isBookmarksPage:', isBookmarks, window.location.href);
+    return isBookmarks;
   }
 
   async scanCurrentPage() {
-    if (this.isScanning) {
-      throw new Error('Scan already in progress');
-    }
-    this.isScanning = true;
-    console.log('Starting bookmark scan...');
     try {
-      // Wait for initial content
-      await this.waitForContent();
-      // Auto-scroll to load more bookmarks
-      let scrolls = 0;
-      const maxScrolls = 10; // Prevent infinite loops
-      let loadedMore = true;
-      while (loadedMore && scrolls < maxScrolls) {
-        loadedMore = await this.loadMoreContent();
-        scrolls++;
-      }
-      console.log(`Auto-scrolled ${scrolls} times to load bookmarks.`);
-      // Debug: log the HTML of the first article
-      const firstArticle = document.querySelector('article');
-      if (firstArticle) {
-        console.log('[Content Script] First article HTML:', firstArticle.outerHTML);
-      }
-      const urls = [];
-      const maxUrls = 100; // Prevent memory issues
-      // Multiple strategies for finding bookmark URLs
-      const strategies = [
-        () => this.scanByLinkElements(),
-        () => this.scanByArticleElements(),
-        () => this.scanByTestIds(),
-        () => this.scanByHref()
-      ];
-      for (const strategy of strategies) {
-        try {
-          const foundUrls = strategy();
-          urls.push(...foundUrls);
-          if (urls.length >= maxUrls) break;
-        } catch (error) {
-          console.warn('Strategy failed:', error);
+      this.sendProgress('Extracting visible bookmarks...');
+      console.log('[X Extractor] scanCurrentPage started');
+      // Extract all tweet data from the bookmarks page
+      const tweets = [];
+      const articles = document.querySelectorAll('article');
+      for (const article of articles) {
+        // URL
+        let url = '';
+        const link = article.querySelector('a[href*="/status/"]');
+        if (link) url = link.href;
+        if (!url) continue;
+        // Text
+        let text = '';
+        const textEls = article.querySelectorAll('[data-testid="tweetText"]');
+        textEls.forEach(el => {
+          text += (el.textContent?.trim() || '') + ' ';
+        });
+        text = text.trim();
+        // Author display name & username (from tweet header)
+        let displayName = '';
+        let username = '';
+        const header = article.querySelector('div[role="group"]')?.parentElement?.parentElement;
+        if (header) {
+          // displayName: first span in header (not in tweet text)
+          const spans = header.querySelectorAll('span');
+          if (spans.length > 0) displayName = spans[0].textContent?.trim() || '';
+          // username: span with '@' in text
+          for (const span of spans) {
+            if (span.textContent && span.textContent.trim().startsWith('@')) {
+              username = span.textContent.trim().replace('@', '');
+              break;
+            }
+          }
         }
+        // Fallbacks
+        if (!displayName) {
+          const nameSpan = article.querySelector('div[dir="auto"] > span');
+          if (nameSpan) displayName = nameSpan.textContent?.trim() || '';
+        }
+        if (!username) {
+          const handleSpan = article.querySelector('div[dir="ltr"] > span');
+          if (handleSpan) username = handleSpan.textContent?.replace('@', '').trim() || '';
+        }
+        // Date/time
+        let dateTime = '';
+        const timeEl = article.querySelector('time');
+        if (timeEl) dateTime = timeEl.getAttribute('datetime') || '';
+        // Likes, retweets, replies, views
+        let likes = '', retweets = '', replies = '', views = '';
+        // Use data-testid for stats
+        const likeEl = article.querySelector('[data-testid="like"]');
+        if (likeEl) likes = likeEl.textContent?.replace(/[^\d]/g, '') || '';
+        const retweetEl = article.querySelector('[data-testid="retweet"]');
+        if (retweetEl) retweets = retweetEl.textContent?.replace(/[^\d]/g, '') || '';
+        const replyEl = article.querySelector('[data-testid="reply"]');
+        if (replyEl) replies = replyEl.textContent?.replace(/[^\d]/g, '') || '';
+        // Views: look for span/div with 'Views' in aria-label or text
+        const viewEl = Array.from(article.querySelectorAll('span, div')).find(el => {
+          const label = el.getAttribute('aria-label') || el.textContent || '';
+          return /views?/i.test(label);
+        });
+        if (viewEl) {
+          const match = viewEl.textContent?.match(/([\d,.]+)/);
+          if (match) views = match[1].replace(/,/g, '');
+        }
+        // Debug log what we found
+        console.log('[X Extractor] Tweet:', {
+          url, text, displayName, username, dateTime, likes, retweets, replies, views
+        });
+        tweets.push({
+          url: url || '',
+          text: text || '',
+          displayName: displayName || '',
+          username: username || '',
+          dateTime: dateTime || '',
+          likes: likes || '',
+          retweets: retweets || '',
+          replies: replies || '',
+          views: views || ''
+        });
       }
-      // Remove duplicates and filter valid URLs
-      const uniqueUrls = [...new Set(urls)]
-        .filter(url => this.isValidTweetUrl(url))
-        .slice(0, maxUrls); // Hard limit to prevent crashes
-      console.log(`Found ${uniqueUrls.length} bookmark URLs`);
-      // Scroll back to absolute top after scan
-      window.scrollTo(0, 0);
-      return uniqueUrls;
-    } finally {
-      this.isScanning = false;
+      this.sendProgress('Extraction finished.');
+      console.log('[X Extractor] scanCurrentPage finished:', tweets.length, 'tweets');
+      return tweets;
+    } catch (err) {
+      this.sendProgress('Extraction error.');
+      console.error('[X Extractor] scanCurrentPage error:', err);
+      throw err;
     }
   }
 
-  // Security: Sanitize text content
-  sanitizeText(text) {
-    if (!text) return '';
-    return text.replace(/[<>]/g, '').slice(0, 200);
-  }
-
-  // Security: Sanitize URLs
-  sanitizeUrl(url) {
+  async scanCurrentPageWithFallback() {
     try {
-      const urlObj = new URL(url);
-      return urlObj.href;
-    } catch {
-      return '';
+      this.sendProgress('Extracting bookmarks (with fallback)...');
+      console.log('[X Extractor] scanCurrentPageWithFallback started');
+      // Extract all tweet data from the bookmarks page (as before)
+      const tweets = [];
+      const foundUrls = new Set();
+      const articles = document.querySelectorAll('article');
+      for (const article of articles) {
+        let url = '';
+        const link = article.querySelector('a[href*="/status/"]');
+        if (link) url = link.href;
+        if (!url) continue;
+        foundUrls.add(url);
+        let text = '';
+        const textEls = article.querySelectorAll('[data-testid="tweetText"]');
+        textEls.forEach(el => {
+          text += (el.textContent?.trim() || '') + ' ';
+        });
+        text = text.trim();
+        let displayName = '';
+        let username = '';
+        const header = article.querySelector('div[role="group"]')?.parentElement?.parentElement;
+        if (header) {
+          const spans = header.querySelectorAll('span');
+          if (spans.length > 0) displayName = spans[0].textContent?.trim() || '';
+          for (const span of spans) {
+            if (span.textContent && span.textContent.trim().startsWith('@')) {
+              username = span.textContent.trim().replace('@', '');
+              break;
+            }
+          }
+        }
+        if (!displayName) {
+          const nameSpan = article.querySelector('div[dir="auto"] > span');
+          if (nameSpan) displayName = nameSpan.textContent?.trim() || '';
+        }
+        if (!username) {
+          const handleSpan = article.querySelector('div[dir="ltr"] > span');
+          if (handleSpan) username = handleSpan.textContent?.replace('@', '').trim() || '';
+        }
+        let dateTime = '';
+        const timeEl = article.querySelector('time');
+        if (timeEl) dateTime = timeEl.getAttribute('datetime') || '';
+        let likes = '', retweets = '', replies = '', views = '';
+        const likeEl = article.querySelector('[data-testid="like"]');
+        if (likeEl) likes = likeEl.textContent?.replace(/[^\d]/g, '') || '';
+        const retweetEl = article.querySelector('[data-testid="retweet"]');
+        if (retweetEl) retweets = retweetEl.textContent?.replace(/[^\d]/g, '') || '';
+        const replyEl = article.querySelector('[data-testid="reply"]');
+        if (replyEl) replies = replyEl.textContent?.replace(/[^\d]/g, '') || '';
+        const viewEl = Array.from(article.querySelectorAll('span, div')).find(el => {
+          const label = el.getAttribute('aria-label') || el.textContent || '';
+          return /views?/i.test(label);
+        });
+        if (viewEl) {
+          const match = viewEl.textContent?.match(/([\d,.]+)/);
+          if (match) views = match[1].replace(/,/g, '');
+        }
+        tweets.push({
+          url: url || '',
+          text: text || '',
+          displayName: displayName || '',
+          username: username || '',
+          dateTime: dateTime || '',
+          likes: likes || '',
+          retweets: retweets || '',
+          replies: replies || '',
+          views: views || ''
+        });
+      }
+      this.sendProgress('Checking for extra tweet links...');
+      // Fallback: find all <a> with /status/ in href
+      const allLinks = Array.from(document.querySelectorAll('a[href*="/status/"]'));
+      for (const link of allLinks) {
+        if (!foundUrls.has(link.href)) {
+          foundUrls.add(link.href);
+          tweets.push({
+            url: link.href,
+            text: '',
+            displayName: '',
+            username: '',
+            dateTime: '',
+            likes: '',
+            retweets: '',
+            replies: '',
+            views: ''
+          });
+        }
+      }
+      const debugUrls = Array.from(foundUrls);
+      this.sendProgress('Extraction finished.');
+      console.log('[X Extractor] scanCurrentPageWithFallback finished:', tweets.length, 'tweets', debugUrls.length, 'unique URLs');
+      return { tweets, debugUrls };
+    } catch (err) {
+      this.sendProgress('Extraction error.');
+      console.error('[X Extractor] scanCurrentPageWithFallback error:', err);
+      throw err;
     }
-  }
-
-  // Security: Sanitize error messages
-  sanitizeError(message) {
-    if (!message) return 'Unknown error';
-    return message.replace(/[<>]/g, '').slice(0, 100);
-  }
-
-  scanByLinkElements() {
-    const urls = [];
-    const links = document.querySelectorAll('a[href*="/status/"]');
-    
-    links.forEach(link => {
-      const href = link.href;
-      if (this.isValidTweetUrl(href)) {
-        urls.push(href);
-      }
-    });
-    
-    return urls;
-  }
-
-  scanByArticleElements() {
-    const urls = [];
-    const articles = document.querySelectorAll('article[data-testid="tweet"]');
-    
-    articles.forEach(article => {
-      const links = article.querySelectorAll('a[href*="/status/"]');
-      links.forEach(link => {
-        if (this.isValidTweetUrl(link.href)) {
-          urls.push(link.href);
-        }
-      });
-    });
-    
-    return urls;
-  }
-
-  scanByTestIds() {
-    const urls = [];
-    const selectors = [
-      '[data-testid="tweet"] a[href*="/status/"]',
-      '[data-testid="cellInnerDiv"] a[href*="/status/"]',
-      '[data-testid="bookmark"] a[href*="/status/"]'
-    ];
-    
-    selectors.forEach(selector => {
-      const elements = document.querySelectorAll(selector);
-      elements.forEach(el => {
-        if (this.isValidTweetUrl(el.href)) {
-          urls.push(el.href);
-        }
-      });
-    });
-    
-    return urls;
-  }
-
-  scanByHref() {
-    const urls = [];
-    const allLinks = document.querySelectorAll('a[href]');
-    
-    allLinks.forEach(link => {
-      const href = link.href;
-      if (href.includes('/status/') && this.isValidTweetUrl(href)) {
-        urls.push(href);
-      }
-    });
-    
-    return urls;
-  }
-
-  isValidTweetUrl(url) {
-    if (!url) return false;
-    
-    // Clean up the URL
-    try {
-      const urlObj = new URL(url);
-      const hostname = urlObj.hostname.toLowerCase();
-      
-      // Must be from X/Twitter
-      if (!hostname.includes('x.com') && !hostname.includes('twitter.com')) {
-        return false;
-      }
-      
-      // Must contain status
-      if (!urlObj.pathname.includes('/status/')) {
-        return false;
-      }
-      
-      // Extract status ID - should be numeric
-      const statusMatch = urlObj.pathname.match(/\/status\/(\d+)/);
-      if (!statusMatch || !statusMatch[1]) {
-        return false;
-      }
-      
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async waitForContent() {
-    return new Promise(resolve => {
-      if (document.querySelectorAll('article').length > 0) {
-        resolve();
-        return;
-      }
-      
-      const observer = new MutationObserver((mutations, obs) => {
-        if (document.querySelectorAll('article').length > 0) {
-          obs.disconnect();
-          this.observers.delete(observer);
-          resolve();
-        }
-      });
-      
-      // Track observer for cleanup
-      this.observers.add(observer);
-      
-      observer.observe(document, {
-        childList: true,
-        subtree: true
-      });
-      
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        observer.disconnect();
-        this.observers.delete(observer);
-        resolve();
-      }, 5000);
-    });
-  }
-
-  // Helper method to scroll and load more content if needed
-  async loadMoreContent() {
-    const initialCount = document.querySelectorAll('article').length;
-    
-    // Scroll to bottom
-    window.scrollTo(0, document.body.scrollHeight);
-    
-    // Wait for new content
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const newCount = document.querySelectorAll('article').length;
-    return newCount > initialCount;
   }
 }
 
-// Initialize scanner
-const scanner = new XBookmarkScanner();
-
-// Add persistent extension indicator when script is active
-const addPersistentExtensionIndicator = () => {
-  let indicator = document.getElementById('x-bookmark-analyzer-indicator');
-  if (!indicator) {
-    indicator = document.createElement('div');
-    indicator.id = 'x-bookmark-analyzer-indicator';
-    indicator.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: #1d4ed8;
-      color: white;
-      padding: 8px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      z-index: 10000;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      pointer-events: none;
-    `;
-    indicator.textContent = '📊 Bookmark Analyzer Active';
-    document.body.appendChild(indicator);
-  }
-};
-
-const removeExtensionIndicator = () => {
-  const indicator = document.getElementById('x-bookmark-analyzer-indicator');
-  if (indicator) indicator.remove();
-};
-
-// Show indicator when on bookmarks page (persistent)
-if (scanner.isBookmarksPage()) {
-  addPersistentExtensionIndicator();
-}
-
-// Remove indicator on cleanup
-const originalCleanup = scanner.cleanup.bind(scanner);
-scanner.cleanup = function() {
-  removeExtensionIndicator();
-  originalCleanup();
-};
+// Initialize the scanner
+new XBookmarkScanner();
