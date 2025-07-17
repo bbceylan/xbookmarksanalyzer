@@ -8,6 +8,7 @@ Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—
 - **Scan Bookmarks**: Extract all tweet URLs from your X Bookmarks page with one click.
 - **Auto-Scroll & Scan All**: Automatically scrolls your bookmarks page to load and extract all bookmarks, even for large accounts.
 - **Download as Markdown**: Export your bookmarks as a clean Markdown list for easy reference or note-taking.
+- **Download as CSV**: Export your bookmarks in a spreadsheet-friendly format.
 - **Copy to Clipboard**: Instantly copy your bookmarks in Markdown format to your clipboard, with a robust fallback if permissions are denied.
 - **Status Bar Feedback**: All actions provide clear, accessible feedback at the top of the popup—no intrusive popups.
 - **Accessibility First**: Full keyboard navigation, ARIA labels, visible focus outlines, and screen reader support.
@@ -44,6 +45,7 @@ Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—
    - For large accounts, click "Auto-Scroll & Scan All" to automatically scroll and load all bookmarks, then extract them.
 4. **Export or Copy**
    - Click "Download .md" to save your bookmarks as a Markdown file.
+   - Click "Download .csv" to save your bookmarks as a CSV file.
    - Or click "Copy to Clipboard" to copy the Markdown list for pasting anywhere. If clipboard permissions are denied, the extension will select the text for you to copy manually.
 
 ## 🛠️ Development
