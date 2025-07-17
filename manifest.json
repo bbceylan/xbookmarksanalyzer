@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Bookmarks Extractor",
-  "version": "1.0.0",
+  "version": "0.5.0",
   "description": "Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys.",
   "action": {
     "default_popup": "popup.html",
@@ -34,6 +34,16 @@
     "scripting",
     "tabs",
     "activeTab",
-    "clipboardWrite"
-  ]
+    "clipboardWrite",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://*.x.com/*",
+    "https://twitter.com/*",
+    "https://*.twitter.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }

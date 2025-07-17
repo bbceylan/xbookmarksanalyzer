@@ -1,23 +1,126 @@
-/* X Bookmarks Extractor - Native X.com Redesign */
+/* X Bookmarks Extractor - Theme Variables */
 
+:root {
+  --primary-color: #1DA1F2;
+  --danger-color: #F4212E;
+  --text-color: #0F1419;
+  --bg-color: #FFFFFF;
+  --border-color: #CFD9DE;
+  --disabled-color: #536471;
+  --hover-bg: rgba(29, 161, 242, 0.1);
+}
+
+/* Dark Mode Theme */
+[data-theme="dark"] {
+  --text-color: #E7E9EA;
+  --bg-color: #15202B;
+  --border-color: #38444D;
+  --hover-bg: rgba(239, 243, 244, 0.1);
+}
+
+/* Base Styles */
 body {
   font-family: 'Chirp', 'Segoe UI', 'Roboto', 'Arial', system-ui, sans-serif;
-  background: #15202B;
-  color: #fff;
+  background: var(--bg-color);
+  color: var(--text-color);
   min-width: 400px;
   max-width: 500px;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .container {
-  background: #15202B;
-  border-radius: 0;
-  border: 1px solid #22303C;
-  box-shadow: 0 6px 32px rgba(0,0,0,0.22);
+  background: var(--bg-color);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 6px 32px rgba(0,0,0,0.1);
   overflow: hidden;
-  padding: 0;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   height: 600px;
+}
+
+/* Progress Bar */
+.progress-container {
+  margin: 8px 0;
+}
+
+.progress-bar {
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--primary-color);
+  width: 0;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: var(--disabled-color);
+  margin-top: 4px;
+  display: block;
+}
+
+/* Dark Mode Toggle */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  margin: 16px 0;
+}
+
+.switch input {
+  display: none;
+}
+
+.slider {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  background: var(--border-color);
+  border-radius: 20px;
+  margin-right: 8px;
+  transition: background-color 0.3s ease;
+}
+
+.slider:before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  left: 2px;
+  top: 2px;
+  transition: transform 0.3s ease;
+}
+
+input:checked + .slider {
+  background: var(--primary-color);
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* Status Bar */
+.status-container {
+  margin-bottom: 16px;
+}
+
+#status-bar {
+  font-size: 14px;
+  color: var(--text-color);
+  margin-bottom: 4px;
+}
+
+#extraction-status {
+  font-size: 12px;
+  color: var(--disabled-color);
 }
 
 .header {

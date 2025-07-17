@@ -1,20 +1,253 @@
 // X Bookmarks Extractor Popup Script
-console.log('X Bookmarks Extractor: Popup loaded');
+
+class BookmarksController {
+  constructor() {
+    this.initializeState();
+    this.bindElements();
+    this.setupEventListeners();
+    this.loadSettings().then(() => this.loadLastExtraction());
+  }
+
+  initializeState() {
+    this.state = {
+      lastExtraction: null,
+      isDarkMode: false,
+      progress: {
+        current: 0,
+        total: 0,
+        status: 'Ready'
+      }
+    };
+
+    this.constants = {
+      BATCH_SIZE: 100,
+      SCROLL_DELAY: 1000,
+      MAX_SAFE_BOOKMARKS: 500
+    };
+  }
+
+  bindElements() {
+    this.elements = {
+      statusBar: document.getElementById('status-bar'),
+      extractionStatus: document.getElementById('extraction-status'),
+      progressBar: document.getElementById('progress-container'),
+      progressFill: document.querySelector('.progress-fill'),
+      progressText: document.getElementById('progress-text'),
+      darkModeToggle: document.getElementById('darkModeToggle'),
+      clearStorageBtn: document.getElementById('clearStorageBtn'),
+      exportButtons: document.querySelectorAll('.export-button'),
+      scanBtn: document.getElementById('scanBtn'),
+      autoScrollBtn: document.getElementById('autoScrollBtn')
+    };
+  }
+
+  async loadSettings() {
+    const settings = await chrome.storage.local.get('settings');
+    if (settings.settings) {
+      this.state.isDarkMode = settings.settings.darkMode || false;
+      this.updateTheme();
+    }
+  }
+
+  async saveSettings() {
+    await chrome.storage.local.set({
+      settings: {
+        darkMode: this.state.isDarkMode
+      }
+    });
+  }
+
+  async loadLastExtraction() {
+    const result = await chrome.storage.local.get('lastExtraction');
+    if (result.lastExtraction) {
+      this.state.lastExtraction = result.lastExtraction.bookmarks;
+      this.updateExtractionStatus(result.lastExtraction.timestamp);
+      this.updateUI();
+    }
+  }
+
+  setupEventListeners() {
+    this.elements.darkModeToggle.addEventListener('change', e => this.handleDarkModeToggle(e));
+    this.elements.clearStorageBtn.addEventListener('click', () => this.handleClearStorage());
+    this.elements.scanBtn.addEventListener('click', () => this.handleScan());
+    this.elements.autoScrollBtn.addEventListener('click', () => this.handleAutoScroll());
+
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg.type === 'progressUpdate') {
+        this.handleProgressUpdate(msg.progress);
+      } else if (msg.type === 'scanComplete') {
+        this.handleScanComplete(msg.bookmarks);
+      }
+    });
+  }
+
+  updateUI() {
+    this.updateExportButtons();
+    this.updateProgressBar();
+  }
+
+  updateExportButtons() {
+    this.elements.exportButtons.forEach(button => {
+      button.disabled = !this.state.lastExtraction;
+    });
+  }
+
+  updateProgressBar() {
+    const { current, total } = this.state.progress;
+    if (total > 0) {
+      const percent = (current / total) * 100;
+      this.elements.progressFill.style.width = `${percent}%`;
+      this.elements.progressText.textContent = `${current} / ${total} bookmarks`;
+      this.elements.progressBar.style.display = 'block';
+    } else {
+      this.elements.progressBar.style.display = 'none';
+    }
+  }
+
+  updateTheme() {
+    document.body.setAttribute('data-theme', this.state.isDarkMode ? 'dark' : 'light');
+  }
+
+  updateStatus(message) {
+    this.elements.statusBar.textContent = message;
+    this.elements.statusBar.setAttribute('aria-label', message);
+  }
+
+  updateExtractionStatus(timestamp) {
+    if (!this.state.lastExtraction) {
+      this.elements.extractionStatus.textContent = '';
+      return;
+    }
+    
+    const age = Date.now() - timestamp;
+    const minutes = Math.floor(age / 60000);
+    this.elements.extractionStatus.textContent = 
+      `${this.state.lastExtraction.length} bookmarks from ${minutes} minutes ago`;
+  }
+
+  // Event Handlers
+  async handleDarkModeToggle(event) {
+    this.state.isDarkMode = event.target.checked;
+    this.updateTheme();
+    await this.saveSettings();
+  }
+
+  async handleClearStorage() {
+    this.state.lastExtraction = null;
+    await chrome.storage.local.remove('lastExtraction');
+    this.updateStatus('Stored bookmarks cleared');
+    this.updateUI();
+  }
+
+  handleProgressUpdate(progress) {
+    this.state.progress = progress;
+    this.updateUI();
+  }
+
+  async handleScanComplete(bookmarks) {
+    this.state.lastExtraction = bookmarks;
+    await chrome.storage.local.set({
+      lastExtraction: {
+        timestamp: Date.now(),
+        bookmarks: bookmarks
+      }
+    });
+    
+    this.updateStatus(`Successfully extracted ${bookmarks.length} bookmarks`);
+    if (bookmarks.length > this.constants.MAX_SAFE_BOOKMARKS) {
+      this.updateStatus('Warning: Large bookmark set detected. Consider batch processing.');
+    }
+    
+    this.updateUI();
+  }
+
+  async handleScan() {
+    this.updateStatus('Scanning bookmarks...');
+    chrome.tabs.query({active: true, currentWindow: true}, tabs => {
+      chrome.tabs.sendMessage(tabs[0].id, {
+        command: 'scan',
+        options: { batchSize: this.constants.BATCH_SIZE }
+      });
+    });
+  }
+
+  async handleAutoScroll() {
+    this.updateStatus('Auto-scrolling and scanning...');
+    chrome.tabs.query({active: true, currentWindow: true}, tabs => {
+      chrome.tabs.sendMessage(tabs[0].id, {
+        command: 'autoScroll',
+        options: { 
+          batchSize: this.constants.BATCH_SIZE,
+          scrollDelay: this.constants.SCROLL_DELAY
+        }
+      });
+    });
+  }
+}
+
+// Initialize controller when popup loads
+document.addEventListener('DOMContentLoaded', () => {
+  const controller = new BookmarksController();
+});
 
 class PopupController {
   constructor() {
+    // State
     this.state = 'initial';
     this.scannedTweets = [];
-    this.autoScroll = true;
+    this.lastExtraction = null;
+    this.isDarkMode = false;
     this.warning = '';
-    this.progress = 'Initializing...';
+    this.progress = {
+      current: 0,
+      total: 0,
+      status: 'Initializing...'
+    };
+
+    // Constants
+    this.BATCH_SIZE = 100;
+    this.SCROLL_DELAY = 1000;
+    this.MAX_SAFE_BOOKMARKS = 500;
+
+    // Elements
     this.mainContent = document.getElementById('mainContent');
-    this.rescanLink = document.getElementById('rescanLink');
-    this.settingsBtn = document.getElementById('settingsBtn');
-    this.closeBtn = document.getElementById('closeBtn');
-    this.render();
-    this.setupFooter();
-    this.setupProgressListener();
+    this.statusBar = document.getElementById('status-bar');
+    this.extractionStatus = document.getElementById('extraction-status');
+    this.progressBar = document.getElementById('progress-bar');
+    this.progressText = document.getElementById('progress-text');
+    this.darkModeToggle = document.getElementById('darkModeToggle');
+    this.clearStorageBtn = document.getElementById('clearStorageBtn');
+
+    // Initialize
+    this.loadSettings();
+    this.loadLastExtraction();
+    this.setupEventListeners();
+    this.updateUI();
+  }
+
+  // Storage Management
+  async loadSettings() {
+    const settings = await chrome.storage.local.get('settings');
+    if (settings.settings) {
+      this.isDarkMode = settings.settings.darkMode || false;
+      this.updateTheme();
+    }
+  }
+
+  async saveSettings() {
+    await chrome.storage.local.set({
+      settings: {
+        darkMode: this.isDarkMode
+      }
+    });
+  }
+
+  async loadLastExtraction() {
+    const result = await chrome.storage.local.get('lastExtraction');
+    if (result.lastExtraction) {
+      this.lastExtraction = result.lastExtraction.bookmarks;
+      this.updateExtractionStatus(result.lastExtraction.timestamp);
+    }
   }
 
   setupFooter() {
@@ -31,23 +264,96 @@ class PopupController {
     });
   }
 
-  setupProgressListener() {
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      if (msg && msg.type === 'progressUpdate') {
-        this.progress = msg.status;
-        if (this.state === 'scanning') this.render();
-      }
+  // UI Updates
+  updateUI() {
+    this.updateExportButtons();
+    this.updateProgressBar();
+    this.updateTheme();
+  }
+
+  updateExportButtons() {
+    const exportButtons = document.querySelectorAll('.export-button');
+    exportButtons.forEach(button => {
+      button.disabled = !this.lastExtraction;
     });
   }
 
-  setState(state, tweets = [], warning = '') {
-    this.state = state;
-    if (state === 'complete') {
-      this.scannedTweets = tweets;
-      this.warning = warning;
-    } else {
-      this.warning = '';
+  updateProgressBar() {
+    if (this.progress.total > 0) {
+      const percent = (this.progress.current / this.progress.total) * 100;
+      this.progressBar.style.width = `${percent}%`;
+      this.progressText.textContent = `${this.progress.current} / ${this.progress.total} bookmarks`;
+      this.progressBar.setAttribute('aria-valuenow', percent);
     }
+  }
+
+  updateTheme() {
+    document.body.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light');
+  }
+
+  updateExtractionStatus(timestamp) {
+    if (!this.lastExtraction) {
+      this.extractionStatus.textContent = '';
+      return;
+    }
+    
+    const age = Date.now() - timestamp;
+    const minutes = Math.floor(age / 60000);
+    this.extractionStatus.textContent = 
+      `${this.lastExtraction.length} bookmarks from ${minutes} minutes ago`;
+  }
+
+  updateStatus(message) {
+    this.statusBar.textContent = message;
+    this.statusBar.setAttribute('aria-label', message);
+  }
+
+  // Event Handlers
+  async handleDarkModeToggle(event) {
+    this.isDarkMode = event.target.checked;
+    this.updateTheme();
+    await this.saveSettings();
+  }
+
+  async handleClearStorage() {
+    this.lastExtraction = null;
+    await chrome.storage.local.remove('lastExtraction');
+    this.updateStatus('Stored bookmarks cleared');
+    this.updateUI();
+  }
+
+  async handleScanComplete(bookmarks) {
+    this.lastExtraction = bookmarks;
+    await chrome.storage.local.set({
+      lastExtraction: {
+        timestamp: Date.now(),
+        bookmarks: bookmarks
+      }
+    });
+    
+    this.updateStatus(`Successfully extracted ${bookmarks.length} bookmarks`);
+    if (bookmarks.length > this.MAX_SAFE_BOOKMARKS) {
+      this.updateStatus('Warning: Large bookmark set detected. Consider batch processing.');
+    }
+    
+    this.updateUI();
+  }
+
+  // Event Listeners
+  setupEventListeners() {
+    this.darkModeToggle.addEventListener('change', this.handleDarkModeToggle.bind(this));
+    this.clearStorageBtn.addEventListener('click', this.handleClearStorage.bind(this));
+    
+    // Progress updates from content script
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg.type === 'progressUpdate') {
+        this.progress = msg.progress;
+        this.updateUI();
+      } else if (msg.type === 'scanComplete') {
+        this.handleScanComplete(msg.bookmarks);
+      }
+    });
+  }
     this.render();
   }
 

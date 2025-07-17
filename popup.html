@@ -17,11 +17,50 @@
       <button class="icon-btn icon-close" id="closeBtn" aria-label="Close popup"></button>
     </header>
     <main id="mainContent">
-      <!-- State-driven content will be rendered here by JS -->
-      <button id="bookmarksBtn" class="bookmark-page-btn" style="display:none;">Go to Bookmarks Page</button>
+      <!-- Status Bar -->
+      <div class="status-container">
+        <div id="status-bar" role="status" aria-live="polite"></div>
+        <div id="extraction-status" role="status" aria-live="polite"></div>
+        <div id="progress-container" class="progress-container" style="display: none;">
+          <div id="progress-bar" class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-fill"></div>
+          </div>
+          <span id="progress-text" class="progress-text"></span>
+        </div>
+      </div>
+
+      <!-- Main Actions -->
+      <div class="action-group">
+        <button id="bookmarksBtn" class="action-button">Go to Bookmarks Page</button>
+        <button id="scanBtn" class="action-button">Scan Bookmarks</button>
+        <button id="autoScrollBtn" class="action-button">Auto-Scroll & Scan All</button>
+      </div>
+
+      <!-- Export Options -->
+      <div class="export-group">
+        <button id="exportMdBtn" class="export-button" disabled>Download .md</button>
+        <button id="exportCsvBtn" class="export-button" disabled>Download .csv</button>
+        <button id="copyClipboardBtn" class="export-button" disabled>Copy to Clipboard</button>
+      </div>
+
+      <!-- Settings -->
+      <div class="settings-group">
+        <label class="switch">
+          <input type="checkbox" id="darkModeToggle">
+          <span class="slider round"></span>
+          <span class="label">Dark Mode</span>
+        </label>
+        <button id="clearStorageBtn" class="action-button danger">Clear Stored Bookmarks</button>
+      </div>
+
+      <!-- Search (Coming Soon) -->
+      <div class="search-group disabled">
+        <input type="text" id="searchInput" placeholder="Search bookmarks... (Coming Soon)" disabled>
+        <button id="searchBtn" disabled>Search</button>
+      </div>
     </main>
     <footer class="footer">
-      <a href="#" id="rescanLink" class="footer-link" style="display:none;">Rescan</a>
+      <span id="version" class="version-text">v0.5.0 Beta</span>
       <button class="icon-btn icon-cog" id="settingsBtn" aria-label="Settings"></button>
     </footer>
   </div>
