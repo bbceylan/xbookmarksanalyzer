@@ -226,7 +226,15 @@ class PopupController {
       chrome.scripting.executeScript({
         target: { tabId: tabs[0].id },
         func: async () => {
+          const sendProgress = (status) => {
+            try {
+              chrome.runtime.sendMessage({ type: 'progressUpdate', status });
+            } catch (e) {
+              // ignore
+            }
+          };
           // Aggressive: scroll down, up, down, with long waits
+          sendProgress('Scrolling page...');
           for (let cycle = 0; cycle < 2; cycle++) {
             for (let i = 0; i < 60; i++) {
               window.scrollTo(0, document.body.scrollHeight);
@@ -237,6 +245,7 @@ class PopupController {
           }
           window.scrollTo(0, document.body.scrollHeight);
           await new Promise(r => setTimeout(r, 3000));
+          sendProgress('Scanning loaded content...');
         }
       }, () => {
         setTimeout(() => {
