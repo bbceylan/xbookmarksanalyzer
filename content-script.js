@@ -4,6 +4,8 @@ console.log('X Bookmarks Extractor: Content script loaded');
 class XBookmarkScanner {
   constructor() {
     this.setupMessageListener();
+    this.cachedElements = new Map(); // Cache for DOM elements
+    this.performanceMetrics = { startTime: 0, endTime: 0, articlesProcessed: 0 };
     console.log('[X Extractor] XBookmarkScanner initialized');
     this.sendProgress('Content script initialized.');
   }
@@ -24,10 +26,10 @@ class XBookmarkScanner {
         console.log('[X Extractor] Received message:', request);
         if (request.action === 'scanBookmarksWithFallback') {
           this.sendProgress('Starting extraction...');
-          this.scanCurrentPageWithFallback().then(({tweets, debugUrls}) => {
+          this.scanCurrentPage(true).then(result => {
             this.sendProgress('Extraction complete.');
-            console.log('[X Extractor] scanCurrentPageWithFallback complete:', tweets.length, 'tweets');
-            sendResponse({ tweets, debugUrls, success: true });
+            console.log('[X Extractor] scanCurrentPage complete:', result.tweets.length, 'tweets');
+            sendResponse({ ...result, success: true });
           }).catch(error => {
             this.sendProgress('Extraction failed.');
             console.error('[X Extractor] Scanning error (fallback):', error);
@@ -37,10 +39,10 @@ class XBookmarkScanner {
         }
         if (request.action === 'scanBookmarks') {
           this.sendProgress('Starting extraction...');
-          this.scanCurrentPage().then(tweets => {
+          this.scanCurrentPage(false).then(result => {
             this.sendProgress('Extraction complete.');
-            console.log('[X Extractor] scanCurrentPage complete:', tweets.length, 'tweets');
-            sendResponse({ tweets, success: true });
+            console.log('[X Extractor] scanCurrentPage complete:', result.tweets.length, 'tweets');
+            sendResponse({ tweets: result.tweets, success: true });
           }).catch(error => {
             this.sendProgress('Extraction failed.');
             console.error('[X Extractor] Scanning error:', error);
@@ -73,101 +75,66 @@ class XBookmarkScanner {
     return isBookmarks;
   }
 
-  async scanCurrentPage() {
+  // Unified scan method with optional fallback
+  async scanCurrentPage(useFallback = false) {
     try {
-      this.sendProgress('Extracting visible bookmarks...');
-      console.log('[X Extractor] scanCurrentPage started');
-      // Extract all tweet data from the bookmarks page
+      this.performanceMetrics.startTime = performance.now();
+      this.sendProgress(useFallback ? 'Extracting bookmarks (with fallback)...' : 'Extracting visible bookmarks...');
+      console.log('[X Extractor] scanCurrentPage started, fallback:', useFallback);
+
       const tweets = [];
+      const foundUrls = new Set();
       const articles = document.querySelectorAll('article');
+      this.performanceMetrics.articlesProcessed = articles.length;
+
+      // Batch process articles for better performance
       for (const article of articles) {
-        // URL
-        let url = '';
-        const link = article.querySelector('a[href*="/status/"]');
-        if (link) url = link.href;
-        if (!url) continue;
-        // Text
-        let text = '';
-        const textEls = article.querySelectorAll('[data-testid="tweetText"]');
-        textEls.forEach(el => {
-          text += (el.textContent?.trim() || '') + ' ';
-        });
-        text = text.trim();
-        // Author display name & username (from tweet header)
-        let displayName = '';
-        let username = '';
-        const header = article.querySelector('div[role="group"]')?.parentElement?.parentElement;
-        if (header) {
-          // displayName: first span in header (not in tweet text)
-          const spans = header.querySelectorAll('span');
-          if (spans.length > 0) displayName = spans[0].textContent?.trim() || '';
-          // username: span with '@' in text
-          for (const span of spans) {
-            if (span.textContent && span.textContent.trim().startsWith('@')) {
-              username = span.textContent.trim().replace('@', '');
-              break;
-            }
-          }
+        const tweetData = this.extractTweetData(article);
+        if (tweetData.url) {
+          foundUrls.add(tweetData.url);
+          tweets.push(tweetData);
         }
-        // Fallbacks
-        if (!displayName) {
-          const nameSpan = article.querySelector('div[dir="auto"] > span');
-          if (nameSpan) displayName = nameSpan.textContent?.trim() || '';
-        }
-        if (!username) {
-          const handleSpan = article.querySelector('div[dir="ltr"] > span');
-          if (handleSpan) {
-            username = handleSpan.textContent?.replace('@', '').trim() || '';
-          }
-        }
-        // Fallback: derive username from tweet URL if still missing
-        if (!username && url) {
-          const match = url.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
-          if (match) {
-            username = match[1];
-          }
-        }
-        // Date/time
-        let dateTime = '';
-        const timeEl = article.querySelector('time');
-        if (timeEl) dateTime = timeEl.getAttribute('datetime') || '';
-        // Likes, retweets, replies, views
-        let likes = '', retweets = '', replies = '', views = '';
-        // Use data-testid for stats
-        const likeEl = article.querySelector('[data-testid="like"]');
-        if (likeEl) likes = likeEl.textContent?.replace(/[^\d]/g, '') || '';
-        const retweetEl = article.querySelector('[data-testid="retweet"]');
-        if (retweetEl) retweets = retweetEl.textContent?.replace(/[^\d]/g, '') || '';
-        const replyEl = article.querySelector('[data-testid="reply"]');
-        if (replyEl) replies = replyEl.textContent?.replace(/[^\d]/g, '') || '';
-        // Views: look for span/div with 'Views' in aria-label or text
-        const viewEl = Array.from(article.querySelectorAll('span, div')).find(el => {
-          const label = el.getAttribute('aria-label') || el.textContent || '';
-          return /views?/i.test(label);
-        });
-        if (viewEl) {
-          const match = viewEl.textContent?.match(/([\d,.]+)/);
-          if (match) views = match[1].replace(/,/g, '');
-        }
-        // Debug log what we found
-        console.log('[X Extractor] Tweet:', {
-          url, text, displayName, username, dateTime, likes, retweets, replies, views
-        });
-        tweets.push({
-          url: url || '',
-          text: text || '',
-          displayName: displayName || '',
-          username: username || '',
-          dateTime: dateTime || '',
-          likes: likes || '',
-          retweets: retweets || '',
-          replies: replies || '',
-          views: views || ''
-        });
       }
+
+      // Fallback: find all tweet links that weren't in articles
+      if (useFallback) {
+        this.sendProgress('Checking for extra tweet links...');
+        const allLinks = Array.from(document.querySelectorAll('a[href*="/status/"]'));
+        for (const link of allLinks) {
+          if (!foundUrls.has(link.href)) {
+            foundUrls.add(link.href);
+            // Extract username from URL for minimal data
+            const match = link.href.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
+            tweets.push({
+              url: link.href,
+              text: '',
+              displayName: '',
+              username: match ? match[1] : '',
+              dateTime: '',
+              likes: '',
+              retweets: '',
+              replies: '',
+              views: ''
+            });
+          }
+        }
+      }
+
+      this.performanceMetrics.endTime = performance.now();
+      const duration = Math.round(this.performanceMetrics.endTime - this.performanceMetrics.startTime);
+
       this.sendProgress('Extraction finished.');
-      console.log('[X Extractor] scanCurrentPage finished:', tweets.length, 'tweets');
-      return tweets;
+      console.log(`[X Extractor] scanCurrentPage finished: ${tweets.length} tweets, ${duration}ms`);
+
+      return {
+        tweets,
+        debugUrls: useFallback ? Array.from(foundUrls) : undefined,
+        performance: {
+          duration,
+          articlesProcessed: this.performanceMetrics.articlesProcessed,
+          tweetsExtracted: tweets.length
+        }
+      };
     } catch (err) {
       this.sendProgress('Extraction error.');
       console.error('[X Extractor] scanCurrentPage error:', err);
@@ -175,114 +142,96 @@ class XBookmarkScanner {
     }
   }
 
-  async scanCurrentPageWithFallback() {
-    try {
-      this.sendProgress('Extracting bookmarks (with fallback)...');
-      console.log('[X Extractor] scanCurrentPageWithFallback started');
-      // Extract all tweet data from the bookmarks page (as before)
-      const tweets = [];
-      const foundUrls = new Set();
-      const articles = document.querySelectorAll('article');
-      for (const article of articles) {
-        let url = '';
-        const link = article.querySelector('a[href*="/status/"]');
-        if (link) url = link.href;
-        if (!url) continue;
-        foundUrls.add(url);
-        let text = '';
-        const textEls = article.querySelectorAll('[data-testid="tweetText"]');
-        textEls.forEach(el => {
-          text += (el.textContent?.trim() || '') + ' ';
-        });
-        text = text.trim();
-        let displayName = '';
-        let username = '';
-        const header = article.querySelector('div[role="group"]')?.parentElement?.parentElement;
-        if (header) {
-          const spans = header.querySelectorAll('span');
-          if (spans.length > 0) displayName = spans[0].textContent?.trim() || '';
-          for (const span of spans) {
-            if (span.textContent && span.textContent.trim().startsWith('@')) {
-              username = span.textContent.trim().replace('@', '');
-              break;
-            }
-          }
-        }
-        if (!displayName) {
-          const nameSpan = article.querySelector('div[dir="auto"] > span');
-          if (nameSpan) displayName = nameSpan.textContent?.trim() || '';
-        }
-        if (!username) {
-          const handleSpan = article.querySelector('div[dir="ltr"] > span');
-          if (handleSpan) {
-            username = handleSpan.textContent?.replace('@', '').trim() || '';
-          }
-        }
-        // Fallback: derive username from tweet URL if still missing
-        if (!username && url) {
-          const match = url.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
-          if (match) {
-            username = match[1];
-          }
-        }
-        let dateTime = '';
-        const timeEl = article.querySelector('time');
-        if (timeEl) dateTime = timeEl.getAttribute('datetime') || '';
-        let likes = '', retweets = '', replies = '', views = '';
-        const likeEl = article.querySelector('[data-testid="like"]');
-        if (likeEl) likes = likeEl.textContent?.replace(/[^\d]/g, '') || '';
-        const retweetEl = article.querySelector('[data-testid="retweet"]');
-        if (retweetEl) retweets = retweetEl.textContent?.replace(/[^\d]/g, '') || '';
-        const replyEl = article.querySelector('[data-testid="reply"]');
-        if (replyEl) replies = replyEl.textContent?.replace(/[^\d]/g, '') || '';
-        const viewEl = Array.from(article.querySelectorAll('span, div')).find(el => {
-          const label = el.getAttribute('aria-label') || el.textContent || '';
-          return /views?/i.test(label);
-        });
-        if (viewEl) {
-          const match = viewEl.textContent?.match(/([\d,.]+)/);
-          if (match) views = match[1].replace(/,/g, '');
-        }
-        tweets.push({
-          url: url || '',
-          text: text || '',
-          displayName: displayName || '',
-          username: username || '',
-          dateTime: dateTime || '',
-          likes: likes || '',
-          retweets: retweets || '',
-          replies: replies || '',
-          views: views || ''
-        });
-      }
-      this.sendProgress('Checking for extra tweet links...');
-      // Fallback: find all <a> with /status/ in href
-      const allLinks = Array.from(document.querySelectorAll('a[href*="/status/"]'));
-      for (const link of allLinks) {
-        if (!foundUrls.has(link.href)) {
-          foundUrls.add(link.href);
-          tweets.push({
-            url: link.href,
-            text: '',
-            displayName: '',
-            username: '',
-            dateTime: '',
-            likes: '',
-            retweets: '',
-            replies: '',
-            views: ''
-          });
+  // Extract data from a single article element (DRY principle)
+  extractTweetData(article) {
+    // URL
+    const link = article.querySelector('a[href*="/status/"]');
+    const url = link ? link.href : '';
+    if (!url) return { url: '' };
+
+    // Text - use array join for efficiency
+    const textEls = article.querySelectorAll('[data-testid="tweetText"]');
+    const textParts = [];
+    textEls.forEach(el => {
+      const text = el.textContent?.trim();
+      if (text) textParts.push(text);
+    });
+    const text = textParts.join(' ');
+
+    // Author display name & username
+    let displayName = '';
+    let username = '';
+
+    const header = article.querySelector('div[role="group"]')?.parentElement?.parentElement;
+    if (header) {
+      const spans = header.querySelectorAll('span');
+      if (spans.length > 0) displayName = spans[0].textContent?.trim() || '';
+      // Find username span
+      for (const span of spans) {
+        const spanText = span.textContent?.trim();
+        if (spanText && spanText.startsWith('@')) {
+          username = spanText.replace('@', '');
+          break;
         }
       }
-      const debugUrls = Array.from(foundUrls);
-      this.sendProgress('Extraction finished.');
-      console.log('[X Extractor] scanCurrentPageWithFallback finished:', tweets.length, 'tweets', debugUrls.length, 'unique URLs');
-      return { tweets, debugUrls };
-    } catch (err) {
-      this.sendProgress('Extraction error.');
-      console.error('[X Extractor] scanCurrentPageWithFallback error:', err);
-      throw err;
     }
+
+    // Fallback for display name
+    if (!displayName) {
+      const nameSpan = article.querySelector('div[dir="auto"] > span');
+      if (nameSpan) displayName = nameSpan.textContent?.trim() || '';
+    }
+
+    // Fallback for username
+    if (!username) {
+      const handleSpan = article.querySelector('div[dir="ltr"] > span');
+      if (handleSpan) {
+        username = handleSpan.textContent?.replace('@', '').trim() || '';
+      }
+    }
+
+    // Extract username from URL if still missing
+    if (!username && url) {
+      const match = url.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
+      if (match) username = match[1];
+    }
+
+    // Date/time
+    const timeEl = article.querySelector('time');
+    const dateTime = timeEl ? timeEl.getAttribute('datetime') || '' : '';
+
+    // Engagement metrics
+    const likeEl = article.querySelector('[data-testid="like"]');
+    const likes = likeEl ? likeEl.textContent?.replace(/[^\d]/g, '') || '' : '';
+
+    const retweetEl = article.querySelector('[data-testid="retweet"]');
+    const retweets = retweetEl ? retweetEl.textContent?.replace(/[^\d]/g, '') || '' : '';
+
+    const replyEl = article.querySelector('[data-testid="reply"]');
+    const replies = replyEl ? replyEl.textContent?.replace(/[^\d]/g, '') || '' : '';
+
+    // Views - use find for better performance
+    let views = '';
+    const viewEl = Array.from(article.querySelectorAll('span, div')).find(el => {
+      const label = el.getAttribute('aria-label') || el.textContent || '';
+      return /views?/i.test(label);
+    });
+    if (viewEl) {
+      const match = viewEl.textContent?.match(/([\d,.]+)/);
+      if (match) views = match[1].replace(/,/g, '');
+    }
+
+    return {
+      url,
+      text,
+      displayName,
+      username,
+      dateTime,
+      likes,
+      retweets,
+      replies,
+      views
+    };
   }
 }
 

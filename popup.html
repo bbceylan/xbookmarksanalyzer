@@ -41,10 +41,18 @@
         <button id="analyzeAiBtn" class="action-button ai-button" disabled>Analyze Bookmarks</button>
       </div>
 
+      <!-- Search & Filter -->
+      <div class="search-group">
+        <input type="text" id="searchInput" placeholder="Search bookmarks by text, author..." class="search-input">
+        <button id="filterBtn" class="action-button">Filter</button>
+        <button id="metricsBtn" class="action-button">Metrics</button>
+      </div>
+
       <!-- Export Options -->
       <div class="export-group">
         <button id="exportMdBtn" class="export-button" disabled>Download .md</button>
         <button id="exportCsvBtn" class="export-button" disabled>Download .csv</button>
+        <button id="exportJsonBtn" class="export-button" disabled>Download .json</button>
         <button id="copyClipboardBtn" class="export-button" disabled>Copy to Clipboard</button>
       </div>
 
@@ -57,15 +65,9 @@
         </label>
         <button id="clearStorageBtn" class="action-button danger">Clear Stored Bookmarks</button>
       </div>
-
-      <!-- Search (Coming Soon) -->
-      <div class="search-group disabled">
-        <input type="text" id="searchInput" placeholder="Search bookmarks... (Coming Soon)" disabled>
-        <button id="searchBtn" disabled>Search</button>
-      </div>
     </main>
     <footer class="footer">
-      <span id="version" class="version-text">v0.7.0 Beta</span>
+      <span id="version" class="version-text">v0.8.0 Beta</span>
       <button class="icon-btn icon-cog" id="settingsBtn" aria-label="Settings"></button>
     </footer>
   </div>
