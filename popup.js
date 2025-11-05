@@ -1,15 +1,10 @@
-// X Bookmarks Extractor Popup Script v0.5.0
-
-document.addEventListener('DOMContentLoaded', () => {
-  const popup = new PopupController();
-});
+// X Bookmarks Analyzer with AI - Popup Script v0.6.0
 
 class PopupController {
   constructor() {
     this.initializeState();
     this.bindElements();
     this.setupEventListeners();
-    this.setupFooter();
     this.loadSettings().then(() => {
       this.loadLastExtraction();
       this.render();
@@ -20,6 +15,8 @@ class PopupController {
     this.state = {
       lastExtraction: null,
       isDarkMode: false,
+      aiAnalysis: null,
+      apiKey: '',
       progress: {
         current: 0,
         total: 0,
@@ -43,17 +40,27 @@ class PopupController {
       progressText: document.getElementById('progress-text'),
       darkModeToggle: document.getElementById('darkModeToggle'),
       clearStorageBtn: document.getElementById('clearStorageBtn'),
-      exportButtons: document.querySelectorAll('.export-button'),
+      bookmarksBtn: document.getElementById('bookmarksBtn'),
       scanBtn: document.getElementById('scanBtn'),
-      autoScrollBtn: document.getElementById('autoScrollBtn')
+      autoScrollBtn: document.getElementById('autoScrollBtn'),
+      analyzeAiBtn: document.getElementById('analyzeAiBtn'),
+      exportMdBtn: document.getElementById('exportMdBtn'),
+      exportCsvBtn: document.getElementById('exportCsvBtn'),
+      copyClipboardBtn: document.getElementById('copyClipboardBtn'),
+      mainContent: document.getElementById('mainContent'),
+      closeBtn: document.getElementById('closeBtn'),
+      settingsBtn: document.getElementById('settingsBtn')
     };
-  }
+  };
 
   loadSettings = async () => {
-    const settings = await chrome.storage.local.get('settings');
+    const settings = await chrome.storage.local.get(['settings', 'apiKey']);
     if (settings.settings) {
       this.state.isDarkMode = settings.settings.darkMode || false;
       this.updateTheme();
+    }
+    if (settings.apiKey) {
+      this.state.apiKey = settings.apiKey;
     }
   };
 
@@ -65,21 +72,48 @@ class PopupController {
     });
   };
 
+  saveApiKey = async (apiKey) => {
+    this.state.apiKey = apiKey;
+    await chrome.storage.local.set({ apiKey: apiKey });
+  };
+
   loadLastExtraction = async () => {
-    const result = await chrome.storage.local.get('lastExtraction');
+    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis']);
     if (result.lastExtraction) {
       this.state.lastExtraction = result.lastExtraction.bookmarks;
       this.updateExtractionStatus(result.lastExtraction.timestamp);
       this.updateUI();
     }
+    if (result.aiAnalysis) {
+      this.state.aiAnalysis = result.aiAnalysis;
+    }
   };
 
   setupEventListeners = () => {
+    // Dark mode toggle
     this.elements.darkModeToggle.addEventListener('change', e => this.handleDarkModeToggle(e));
+
+    // Clear storage
     this.elements.clearStorageBtn.addEventListener('click', () => this.handleClearStorage());
+
+    // Scan buttons
     this.elements.scanBtn.addEventListener('click', () => this.handleScan());
     this.elements.autoScrollBtn.addEventListener('click', () => this.handleAutoScroll());
+    this.elements.bookmarksBtn.addEventListener('click', () => this.openBookmarksPage());
 
+    // AI Analysis button
+    this.elements.analyzeAiBtn.addEventListener('click', () => this.analyzeBookmarks());
+
+    // Export buttons
+    this.elements.exportMdBtn.addEventListener('click', () => this.downloadMarkdown());
+    this.elements.exportCsvBtn.addEventListener('click', () => this.downloadCSV());
+    this.elements.copyClipboardBtn.addEventListener('click', () => this.copyToClipboard());
+
+    // Settings and close
+    this.elements.closeBtn.addEventListener('click', () => window.close());
+    this.elements.settingsBtn.addEventListener('click', () => this.showSettingsDialog());
+
+    // Listen for messages from content script
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'progressUpdate') {
         this.handleProgressUpdate(msg.progress);
@@ -95,9 +129,11 @@ class PopupController {
   };
 
   updateExportButtons = () => {
-    this.elements.exportButtons.forEach(button => {
-      button.disabled = !this.state.lastExtraction;
-    });
+    const hasData = this.state.lastExtraction && this.state.lastExtraction.length > 0;
+    this.elements.exportMdBtn.disabled = !hasData;
+    this.elements.exportCsvBtn.disabled = !hasData;
+    this.elements.copyClipboardBtn.disabled = !hasData;
+    this.elements.analyzeAiBtn.disabled = !hasData;
   };
 
   updateProgressBar = () => {
@@ -126,10 +162,10 @@ class PopupController {
       this.elements.extractionStatus.textContent = '';
       return;
     }
-    
+
     const age = Date.now() - timestamp;
     const minutes = Math.floor(age / 60000);
-    this.elements.extractionStatus.textContent = 
+    this.elements.extractionStatus.textContent =
       `${this.state.lastExtraction.length} bookmarks from ${minutes} minutes ago`;
   };
 
@@ -142,8 +178,9 @@ class PopupController {
 
   handleClearStorage = async () => {
     this.state.lastExtraction = null;
-    await chrome.storage.local.remove('lastExtraction');
-    this.updateStatus('Stored bookmarks cleared');
+    this.state.aiAnalysis = null;
+    await chrome.storage.local.remove(['lastExtraction', 'aiAnalysis']);
+    this.updateStatus('Stored bookmarks and analysis cleared');
     this.updateUI();
   };
 
@@ -160,21 +197,35 @@ class PopupController {
         bookmarks: bookmarks
       }
     });
-    
+
     this.updateStatus(`Successfully extracted ${bookmarks.length} bookmarks`);
     if (bookmarks.length > this.constants.MAX_SAFE_BOOKMARKS) {
       this.updateStatus('Warning: Large bookmark set detected. Consider batch processing.');
     }
-    
+
     this.updateUI();
+
+    // Automatically analyze with AI if API key is set
+    if (this.state.apiKey && bookmarks.length > 0) {
+      this.analyzeBookmarks();
+    }
   };
 
   handleScan = () => {
     this.updateStatus('Scanning bookmarks...');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
       chrome.tabs.sendMessage(tabs[0].id, {
-        command: 'scan',
-        options: { batchSize: this.constants.BATCH_SIZE }
+        action: 'scanBookmarks'
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          this.updateStatus('Error: Could not connect to page. Please refresh and try again.');
+          return;
+        }
+        if (response && response.success) {
+          this.handleScanComplete(response.tweets || []);
+        } else {
+          this.updateStatus('Error: Failed to scan bookmarks.');
+        }
       });
     });
   };
@@ -182,438 +233,245 @@ class PopupController {
   handleAutoScroll = () => {
     this.updateStatus('Auto-scrolling and scanning...');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
-      chrome.tabs.sendMessage(tabs[0].id, {
-        command: 'autoScroll',
-        options: { 
-          batchSize: this.constants.BATCH_SIZE,
-          scrollDelay: this.constants.SCROLL_DELAY
-        }
-      });
-    });
-  };
-
-  constructor() {
-    this.scannedTweets = [];
-    this.lastExtraction = null;
-    this.isDarkMode = false;
-    this.warning = '';
-    this.progress = {
-      current: 0,
-      total: 0,
-      status: 'Initializing...'
-    };
-
-    // Constants
-    this.BATCH_SIZE = 100;
-    this.SCROLL_DELAY = 1000;
-    this.MAX_SAFE_BOOKMARKS = 500;
-
-    // Elements
-    this.mainContent = document.getElementById('mainContent');
-    this.statusBar = document.getElementById('status-bar');
-    this.extractionStatus = document.getElementById('extraction-status');
-    this.progressBar = document.getElementById('progress-bar');
-    this.progressText = document.getElementById('progress-text');
-    this.darkModeToggle = document.getElementById('darkModeToggle');
-    this.clearStorageBtn = document.getElementById('clearStorageBtn');
-
-    // Initialize
-    this.loadSettings();
-    this.loadLastExtraction();
-    this.setupEventListeners();
-    this.updateUI();
-  }
-
-  // Storage Management
-  loadSettings = async () => {
-    const settings = await chrome.storage.local.get('settings');
-    if (settings.settings) {
-      this.isDarkMode = settings.settings.darkMode || false;
-      this.updateTheme();
-    }
-  };
-
-  saveSettings = async () => {
-    await chrome.storage.local.set({
-      settings: {
-        darkMode: this.isDarkMode
-      }
-    });
-  };
-
-  loadLastExtraction = async () => {
-    const result = await chrome.storage.local.get('lastExtraction');
-    if (result.lastExtraction) {
-      this.lastExtraction = result.lastExtraction.bookmarks;
-      this.updateExtractionStatus(result.lastExtraction.timestamp);
-    }
-  };
-
-  setupFooter = () => {
-    this.rescanLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      this.setState('initial');
-    });
-    this.settingsBtn.addEventListener('click', () => {
-      this.autoScroll = !this.autoScroll;
-      alert('Auto-Scroll is now ' + (this.autoScroll ? 'ON' : 'OFF'));
-    });
-    this.closeBtn.addEventListener('click', () => {
-      window.close();
-    });
-  };
-
-  // UI Updates
-  updateUI = () => {
-    this.updateExportButtons();
-    this.updateProgressBar();
-    this.updateTheme();
-  };
-
-  updateExportButtons = () => {
-    const exportButtons = document.querySelectorAll('.export-button');
-    exportButtons.forEach(button => {
-      button.disabled = !this.lastExtraction;
-    });
-  };
-
-  updateProgressBar = () => {
-    if (this.progress.total > 0) {
-      const percent = (this.progress.current / this.progress.total) * 100;
-      this.progressBar.style.width = `${percent}%`;
-      this.progressText.textContent = `${this.progress.current} / ${this.progress.total} bookmarks`;
-      this.progressBar.setAttribute('aria-valuenow', percent);
-    }
-  };
-
-  updateTheme = () => {
-    document.body.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light');
-  };
-
-  updateExtractionStatus = (timestamp) => {
-    if (!this.lastExtraction) {
-      this.extractionStatus.textContent = '';
-      return;
-    }
-    
-    const age = Date.now() - timestamp;
-    const minutes = Math.floor(age / 60000);
-    this.extractionStatus.textContent = 
-      `${this.lastExtraction.length} bookmarks from ${minutes} minutes ago`;
-  };
-
-  updateStatus = (message) => {
-    this.statusBar.textContent = message;
-    this.statusBar.setAttribute('aria-label', message);
-  };
-
-  // Event Handlers
-  handleDarkModeToggle = async (event) => {
-    this.isDarkMode = event.target.checked;
-    this.updateTheme();
-    await this.saveSettings();
-  };
-
-  handleClearStorage = async () => {
-    this.lastExtraction = null;
-    await chrome.storage.local.remove('lastExtraction');
-    this.updateStatus('Stored bookmarks cleared');
-    this.updateUI();
-  };
-
-  handleScanComplete = async (bookmarks) => {
-    this.lastExtraction = bookmarks;
-    await chrome.storage.local.set({
-      lastExtraction: {
-        timestamp: Date.now(),
-        bookmarks: bookmarks
-      }
-    });
-    
-    this.updateStatus(`Successfully extracted ${bookmarks.length} bookmarks`);
-    if (bookmarks.length > this.MAX_SAFE_BOOKMARKS) {
-      this.updateStatus('Warning: Large bookmark set detected. Consider batch processing.');
-    }
-    
-    this.updateUI();
-  };
-
-  // Event Listeners
-  setupEventListeners = () => {
-    this.darkModeToggle.addEventListener('change', this.handleDarkModeToggle.bind(this));
-    this.clearStorageBtn.addEventListener('click', this.handleClearStorage.bind(this));
-    
-    // Progress updates from content script
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      if (msg.type === 'progressUpdate') {
-        this.progress = msg.progress;
-        this.updateUI();
-      } else if (msg.type === 'scanComplete') {
-        this.handleScanComplete(msg.bookmarks);
-      }
-    });
-    
-    this.render();
-  };
-
-  render = () => {
-    this.mainContent.innerHTML = '';
-    this.rescanLink.style.display = this.state === 'complete' ? '' : 'none';
-    if (this.state === 'initial') {
-      this.renderInitial();
-    } else if (this.state === 'scanning') {
-      this.renderScanning();
-    } else if (this.state === 'complete') {
-      this.renderComplete();
-    }
-  };
-
-  renderInitial = () => {
-    const container = document.createElement('div');
-    container.className = 'state-initial';
-    const openBtn = document.createElement('button');
-    openBtn.className = 'bookmark-page-btn';
-    openBtn.textContent = 'Go to Bookmarks Page';
-    openBtn.setAttribute('aria-label', 'Go to Bookmarks Page');
-    openBtn.addEventListener('click', () => this.openBookmarksPage());
-    container.appendChild(openBtn);
-    const scanBtn = document.createElement('button');
-    scanBtn.className = 'scan-btn';
-    scanBtn.innerHTML = '<span class="icon-scan"></span>Scan Bookmarks';
-    scanBtn.setAttribute('aria-label', 'Scan Bookmarks');
-    scanBtn.addEventListener('click', () => this.startScan());
-    container.appendChild(scanBtn);
-    const help = document.createElement('div');
-    help.className = 'help-text';
-    help.textContent = 'Find all your bookmarks to export.';
-    container.appendChild(help);
-    const settings = document.createElement('div');
-    settings.className = 'settings';
-    const label = document.createElement('label');
-    label.className = 'toggle-label';
-    label.setAttribute('for', 'autoScrollToggle');
-    label.textContent = 'Auto-Scroll & Scan';
-    const toggle = document.createElement('input');
-    toggle.type = 'checkbox';
-    toggle.id = 'autoScrollToggle';
-    toggle.className = 'toggle-switch';
-    toggle.checked = this.autoScroll;
-    toggle.addEventListener('change', (e) => {
-      this.autoScroll = toggle.checked;
-    });
-    const slider = document.createElement('span');
-    slider.className = 'toggle-slider';
-    label.appendChild(toggle);
-    label.appendChild(slider);
-    settings.appendChild(label);
-    container.appendChild(settings);
-    this.mainContent.appendChild(container);
-  };
-
-  renderScanning = () => {
-    const container = document.createElement('div');
-    container.className = 'state-scanning';
-    const scanBtn = document.createElement('button');
-    scanBtn.className = 'scan-btn';
-    scanBtn.innerHTML = '<span class="icon-scan"></span>Scanning...';
-    scanBtn.setAttribute('aria-label', 'Scanning...');
-    scanBtn.disabled = true;
-    container.appendChild(scanBtn);
-    const spinner = document.createElement('div');
-    spinner.className = 'spinner';
-    container.appendChild(spinner);
-    const progress = document.createElement('div');
-    progress.className = 'progress-status';
-    progress.textContent = this.progress || 'Working...';
-    progress.style.marginTop = '12px';
-    progress.style.fontSize = '15px';
-    container.appendChild(progress);
-    this.mainContent.appendChild(container);
-  };
-
-  renderComplete = () => {
-    const container = document.createElement('div');
-    container.className = 'state-complete';
-    const status = document.createElement('div');
-    status.className = 'status';
-    status.textContent = `${this.scannedTweets.length} Bookmarks Found`;
-    container.appendChild(status);
-    if (this.warning) {
-      const warn = document.createElement('div');
-      warn.style.color = '#ffb300';
-      warn.style.background = 'rgba(255,179,0,0.08)';
-      warn.style.borderRadius = '8px';
-      warn.style.padding = '8px 14px';
-      warn.style.margin = '12px 0 0 0';
-      warn.style.fontSize = '15px';
-      warn.textContent = this.warning;
-      container.appendChild(warn);
-    }
-    const actions = document.createElement('div');
-    actions.className = 'export-actions';
-    const downloadBtn = document.createElement('button');
-    downloadBtn.className = 'export-btn';
-    downloadBtn.innerHTML = '<span class="icon-download"></span>Download as .md';
-    downloadBtn.disabled = this.scannedTweets.length === 0;
-    downloadBtn.addEventListener('click', () => this.downloadMarkdown());
-    actions.appendChild(downloadBtn);
-    const csvBtn = document.createElement('button');
-    csvBtn.className = 'export-btn';
-    csvBtn.innerHTML = '<span class="icon-download"></span>Download .csv';
-    csvBtn.disabled = this.scannedTweets.length === 0;
-    csvBtn.addEventListener('click', () => this.downloadCSV());
-    actions.appendChild(csvBtn);
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'export-btn';
-    copyBtn.innerHTML = '<span class="icon-copy"></span>Copy All';
-    copyBtn.disabled = this.scannedTweets.length === 0;
-    copyBtn.addEventListener('click', () => this.copyToClipboard());
-    actions.appendChild(copyBtn);
-    container.appendChild(actions);
-    const resultsList = document.createElement('div');
-    resultsList.className = 'results-list';
-    if (this.scannedTweets.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'results-list-item';
-      empty.textContent = 'No bookmarks or tweets extracted yet...';
-      resultsList.appendChild(empty);
-    } else {
-      this.scannedTweets.forEach((t, i) => {
-        const item = document.createElement('div');
-        item.className = 'results-list-item';
-        item.innerHTML = `<strong>#${i + 1}</strong> <a href="${t.url}" target="_blank" rel="noopener" style="color:#1D9BF0;text-decoration:none;">${t.url}</a><br><span style="color:#fff;">@${t.username}</span> <span style="color:#8899A6;">${t.text}</span>`;
-        resultsList.appendChild(item);
-      });
-    }
-    container.appendChild(resultsList);
-
-    const mdToggleBtn = document.createElement('button');
-    mdToggleBtn.className = 'markdown-toggle-btn';
-    mdToggleBtn.textContent = 'Show Markdown';
-    const mdArea = document.createElement('textarea');
-    mdArea.className = 'markdown-output';
-    mdArea.value = this.generateMarkdown();
-    mdArea.readOnly = true;
-    mdArea.style.display = 'none';
-    mdArea.addEventListener('focus', () => mdArea.select());
-    mdToggleBtn.addEventListener('click', () => {
-      const isHidden = mdArea.style.display === 'none';
-      mdArea.style.display = isHidden ? 'block' : 'none';
-      mdToggleBtn.textContent = isHidden ? 'Hide Markdown' : 'Show Markdown';
-    });
-    container.appendChild(mdToggleBtn);
-    container.appendChild(mdArea);
-
-    this.mainContent.appendChild(container);
-  }
-
-  startScan = () => {
-    this.progress = 'Initializing...';
-    this.setState('scanning');
-    setTimeout(() => {
-      this.doScan();
-    }, 400);
-  };
-
-  doScan = () => {
-    if (this.autoScroll) {
-      this.aggressiveAutoScrollAndScan();
-    } else {
-      this.basicScan();
-    }
-  };
-
-  basicScan = () => {
-    this.sendScanMessage();
-  };
-
-  aggressiveAutoScrollAndScan = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || !tabs[0]) {
-        this.setState('initial');
-        alert('No active tab found.');
-        return;
-      }
+      // First, inject auto-scroll script
       chrome.scripting.executeScript({
         target: { tabId: tabs[0].id },
         func: async () => {
-          const sendProgress = (status) => {
-            try {
-              chrome.runtime.sendMessage({ type: 'progressUpdate', status });
-            } catch (e) {
-              // ignore
-            }
-          };
-          // Aggressive: scroll down, up, down, with long waits
-          sendProgress('Scrolling page...');
-          for (let cycle = 0; cycle < 2; cycle++) {
-            for (let i = 0; i < 60; i++) {
+          const scrollAndWait = async () => {
+            let lastHeight = 0;
+            let scrollAttempts = 0;
+            const maxAttempts = 50;
+
+            while (scrollAttempts < maxAttempts) {
               window.scrollTo(0, document.body.scrollHeight);
-              await new Promise(r => setTimeout(r, 2500));
+              await new Promise(r => setTimeout(r, 2000));
+
+              const newHeight = document.body.scrollHeight;
+              if (newHeight === lastHeight) {
+                scrollAttempts++;
+                if (scrollAttempts >= 3) break;
+              } else {
+                scrollAttempts = 0;
+              }
+              lastHeight = newHeight;
             }
+
             window.scrollTo(0, 0);
-            await new Promise(r => setTimeout(r, 2500));
-          }
-          window.scrollTo(0, document.body.scrollHeight);
-          await new Promise(r => setTimeout(r, 3000));
-          sendProgress('Scanning loaded content...');
+            await new Promise(r => setTimeout(r, 1000));
+          };
+
+          await scrollAndWait();
         }
       }, () => {
+        // After scrolling, scan
         setTimeout(() => {
-          this.sendScanMessage();
+          this.handleScan();
         }, 2000);
       });
     });
-  }
+  };
 
-  sendScanMessage = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || !tabs[0]) {
-        this.setState('initial');
-        alert('No active tab found.');
-        return;
+  analyzeBookmarks = async () => {
+    if (!this.state.apiKey) {
+      this.updateStatus('No API key configured. Click settings to add one.');
+      return;
+    }
+
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      this.updateStatus('No bookmarks to analyze.');
+      return;
+    }
+
+    this.updateStatus('Analyzing bookmarks with AI...');
+
+    try {
+      const aiService = new AIAnalysisService(this.state.apiKey);
+      const analysis = await aiService.analyzeBookmarks(this.state.lastExtraction);
+
+      this.state.aiAnalysis = analysis;
+      await chrome.storage.local.set({ aiAnalysis: analysis });
+
+      this.updateStatus(`Analysis complete! Found ${analysis.tags.length} tags and ${analysis.categories.length} categories.`);
+      this.showAnalysisResults(analysis);
+    } catch (error) {
+      console.error('AI Analysis error:', error);
+      this.updateStatus(`Analysis failed: ${error.message}`);
+    }
+  };
+
+  showAnalysisResults = (analysis) => {
+    // Create analysis results display
+    const existingResults = document.getElementById('ai-results');
+    if (existingResults) {
+      existingResults.remove();
+    }
+
+    const resultsDiv = document.createElement('div');
+    resultsDiv.id = 'ai-results';
+    resultsDiv.style.cssText = `
+      margin: 16px 0;
+      padding: 16px;
+      background: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+    `;
+
+    let html = '<h3 style="margin-top: 0; color: var(--text-color);">AI Analysis Results</h3>';
+
+    // Overall summary
+    if (analysis.overallSummary) {
+      html += `<div style="margin-bottom: 16px;">
+        <strong style="color: var(--text-color);">Overall Summary:</strong>
+        <p style="color: var(--text-color); margin: 8px 0;">${analysis.overallSummary}</p>
+      </div>`;
+    }
+
+    // Tags
+    if (analysis.tags && analysis.tags.length > 0) {
+      html += `<div style="margin-bottom: 16px;">
+        <strong style="color: var(--text-color);">Tags:</strong><br>
+        <div style="margin-top: 8px;">
+          ${analysis.tags.map(tag => `<span style="display: inline-block; background: var(--primary-color); color: white; padding: 4px 12px; margin: 4px; border-radius: 16px; font-size: 12px;">${tag}</span>`).join('')}
+        </div>
+      </div>`;
+    }
+
+    // Categories
+    if (analysis.categories && analysis.categories.length > 0) {
+      html += `<div style="margin-bottom: 16px;">
+        <strong style="color: var(--text-color);">Categories:</strong>
+        <ul style="color: var(--text-color); margin: 8px 0; padding-left: 20px;">
+          ${analysis.categories.map(cat => `<li>${cat}</li>`).join('')}
+        </ul>
+      </div>`;
+    }
+
+    // Analyze more button
+    html += `<button id="analyzeBtn" style="background: var(--primary-color); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 8px;">Re-analyze</button>`;
+
+    resultsDiv.innerHTML = html;
+
+    // Insert after status container
+    const statusContainer = document.querySelector('.status-container');
+    if (statusContainer && statusContainer.parentNode) {
+      statusContainer.parentNode.insertBefore(resultsDiv, statusContainer.nextSibling);
+    }
+
+    // Bind analyze button
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    if (analyzeBtn) {
+      analyzeBtn.addEventListener('click', () => this.analyzeBookmarks());
+    }
+  };
+
+  showSettingsDialog = () => {
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color);
+      padding: 24px;
+      border-radius: 8px;
+      max-width: 400px;
+      width: 90%;
+    `;
+
+    dialogContent.innerHTML = `
+      <h2 style="margin-top: 0; color: var(--text-color);">Settings</h2>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          AI API Key (OpenAI):
+          <input type="password" id="apiKeyInput" value="${this.state.apiKey}"
+                 style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+        </label>
+        <small style="color: var(--disabled-color);">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" style="color: var(--primary-color);">OpenAI</a></small>
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;">Cancel</button>
+        <button id="saveBtn" style="padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;">Save</button>
+      </div>
+    `;
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    // Event handlers
+    document.getElementById('cancelBtn').addEventListener('click', () => {
+      document.body.removeChild(dialog);
+    });
+
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      const apiKey = document.getElementById('apiKeyInput').value.trim();
+      await this.saveApiKey(apiKey);
+      this.updateStatus('Settings saved!');
+      document.body.removeChild(dialog);
+    });
+
+    // Close on background click
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        document.body.removeChild(dialog);
       }
-      chrome.tabs.sendMessage(
-        tabs[0].id,
-        { command: 'startScanning' },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            this.setState('initial');
-            alert('Could not connect to the page. Refresh and try again.');
-            return;
-          }
-          if (response && response.success && Array.isArray(response.tweets)) {
-            // Check for missing metadata
-            const incomplete = response.tweets.some(t => !t.text || !t.username);
-            let warning = '';
-            if (incomplete) {
-              warning = 'Some bookmarks could not be fully extracted. Try scrolling manually and scanning again.';
-            } else if (response.tweets.length < 10) {
-              warning = 'Warning: Only ' + response.tweets.length + ' items found. Try scrolling manually and scan again.';
-            }
-            this.setState('complete', response.tweets, warning);
-          } else {
-            this.setState('initial');
-            alert('Failed to scan. Make sure you are on the X Bookmarks page.');
-          }
-        }
-      );
     });
   };
 
+  render = () => {
+    // Update UI based on current state
+    this.updateUI();
+
+    // Show AI results if available
+    if (this.state.aiAnalysis) {
+      this.showAnalysisResults(this.state.aiAnalysis);
+    }
+  };
+
   generateMarkdown = () => {
-    if (!this.scannedTweets.length) return '';
-    let md = `| Author | Username | Date | Text | Likes | Retweets | Replies | Views | Link |\n`;
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) return '';
+
+    let md = '# X Bookmarks Export\n\n';
+
+    // Add AI analysis if available
+    if (this.state.aiAnalysis) {
+      md += '## AI Analysis\n\n';
+      if (this.state.aiAnalysis.overallSummary) {
+        md += `**Summary:** ${this.state.aiAnalysis.overallSummary}\n\n`;
+      }
+      if (this.state.aiAnalysis.tags && this.state.aiAnalysis.tags.length > 0) {
+        md += `**Tags:** ${this.state.aiAnalysis.tags.join(', ')}\n\n`;
+      }
+      if (this.state.aiAnalysis.categories && this.state.aiAnalysis.categories.length > 0) {
+        md += `**Categories:**\n${this.state.aiAnalysis.categories.map(c => `- ${c}`).join('\n')}\n\n`;
+      }
+      md += '---\n\n';
+    }
+
+    md += '## Bookmarks\n\n';
+    md += `| Author | Username | Date | Text | Likes | Retweets | Replies | Views | Link |\n`;
     md += `|--------|----------|------|------|-------|----------|---------|-------|------|\n`;
-    this.scannedTweets.forEach(t => {
-      const safeText = (t.text || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+
+    this.state.lastExtraction.forEach(t => {
+      const safeText = (t.text || '').replace(/\|/g, '\\|').replace(/\n/g, ' ').substring(0, 100);
       md += `| ${t.displayName || ''} | @${t.username || ''} | ${t.dateTime || ''} | ${safeText} | ${t.likes || ''} | ${t.retweets || ''} | ${t.replies || ''} | ${t.views || ''} | [Link](${t.url}) |\n`;
     });
+
     return md;
   };
 
   generateCSV = () => {
-    if (!this.scannedTweets.length) return '';
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) return '';
+
     const escapeCSV = (val) => {
       if (val === undefined || val === null) return '';
       const str = String(val).replace(/\n/g, ' ');
@@ -622,23 +480,51 @@ class PopupController {
       }
       return str;
     };
-    let csv = 'Author,Username,Date,Text,Likes,Retweets,Replies,Views,Link\n';
-    this.scannedTweets.forEach(t => {
-      const row = [
-        escapeCSV(t.displayName || ''),
-        escapeCSV('@' + (t.username || '')),
-        escapeCSV(t.dateTime || ''),
-        escapeCSV(t.text || ''),
-        escapeCSV(t.likes || ''),
-        escapeCSV(t.retweets || ''),
-        escapeCSV(t.replies || ''),
-        escapeCSV(t.views || ''),
-        escapeCSV(t.url)
-      ].join(',');
-      csv += row + '\n';
-    });
+
+    let csv = 'Author,Username,Date,Text,Likes,Retweets,Replies,Views,Link';
+
+    // Add AI analysis columns if available
+    if (this.state.aiAnalysis) {
+      csv += ',Tags,Categories\n';
+      const tags = this.state.aiAnalysis.tags ? this.state.aiAnalysis.tags.join('; ') : '';
+      const categories = this.state.aiAnalysis.categories ? this.state.aiAnalysis.categories.join('; ') : '';
+
+      this.state.lastExtraction.forEach(t => {
+        const row = [
+          escapeCSV(t.displayName || ''),
+          escapeCSV('@' + (t.username || '')),
+          escapeCSV(t.dateTime || ''),
+          escapeCSV(t.text || ''),
+          escapeCSV(t.likes || ''),
+          escapeCSV(t.retweets || ''),
+          escapeCSV(t.replies || ''),
+          escapeCSV(t.views || ''),
+          escapeCSV(t.url),
+          escapeCSV(tags),
+          escapeCSV(categories)
+        ].join(',');
+        csv += row + '\n';
+      });
+    } else {
+      csv += '\n';
+      this.state.lastExtraction.forEach(t => {
+        const row = [
+          escapeCSV(t.displayName || ''),
+          escapeCSV('@' + (t.username || '')),
+          escapeCSV(t.dateTime || ''),
+          escapeCSV(t.text || ''),
+          escapeCSV(t.likes || ''),
+          escapeCSV(t.retweets || ''),
+          escapeCSV(t.replies || ''),
+          escapeCSV(t.views || ''),
+          escapeCSV(t.url)
+        ].join(',');
+        csv += row + '\n';
+      });
+    }
+
     return csv;
-  }
+  };
 
   downloadMarkdown = () => {
     const md = this.generateMarkdown();
@@ -647,11 +533,12 @@ class PopupController {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'x-bookmarks.md';
+    a.download = `x-bookmarks-${Date.now()}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    this.updateStatus('Downloaded Markdown file!');
   };
 
   downloadCSV = () => {
@@ -661,26 +548,47 @@ class PopupController {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'x-bookmarks.csv';
+    a.download = `x-bookmarks-${Date.now()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    this.updateStatus('Downloaded CSV file!');
   };
 
   copyToClipboard = () => {
     const md = this.generateMarkdown();
     if (!md) return;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(md);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md)
+        .then(() => {
+          this.updateStatus('Copied to clipboard!');
+        })
+        .catch(err => {
+          console.error('Clipboard error:', err);
+          this.fallbackCopyToClipboard(md);
+        });
     } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = md;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
+      this.fallbackCopyToClipboard(md);
     }
+  };
+
+  fallbackCopyToClipboard = (text) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      this.updateStatus('Copied to clipboard (fallback)!');
+    } catch (err) {
+      console.error('Fallback copy failed:', err);
+      this.updateStatus('Failed to copy. Please try again.');
+    }
+    document.body.removeChild(textarea);
   };
 
   openBookmarksPage = () => {
@@ -693,6 +601,92 @@ class PopupController {
       }
     });
   };
+}
+
+// AI Analysis Service
+class AIAnalysisService {
+  constructor(apiKey) {
+    this.apiKey = apiKey;
+    this.apiUrl = 'https://api.openai.com/v1/chat/completions';
+  }
+
+  async analyzeBookmarks(bookmarks) {
+    // Prepare bookmark data for analysis
+    const bookmarkTexts = bookmarks
+      .filter(b => b.text && b.text.trim())
+      .slice(0, 50) // Limit to first 50 for cost efficiency
+      .map(b => `@${b.username}: ${b.text}`)
+      .join('\n\n');
+
+    if (!bookmarkTexts) {
+      throw new Error('No bookmark content to analyze');
+    }
+
+    const prompt = `Analyze these Twitter/X bookmarks and provide:
+1. An overall summary (2-3 sentences) of the main themes
+2. A list of 5-10 relevant tags/keywords
+3. 3-5 main categories these bookmarks fall into
+
+Bookmarks:
+${bookmarkTexts}
+
+Respond in JSON format:
+{
+  "overallSummary": "...",
+  "tags": ["tag1", "tag2", ...],
+  "categories": ["category1", "category2", ...]
+}`;
+
+    try {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful assistant that analyzes social media content and provides structured summaries.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+
+      // Parse JSON response
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('Failed to parse AI response');
+      }
+
+      const analysis = JSON.parse(jsonMatch[0]);
+      return {
+        overallSummary: analysis.overallSummary || '',
+        tags: analysis.tags || [],
+        categories: analysis.categories || [],
+        timestamp: Date.now()
+      };
+    } catch (error) {
+      console.error('AI Analysis error:', error);
+      throw error;
+    }
+  }
 }
 
 // Initialize the popup controller when the DOM is loaded

@@ -1,10 +1,26 @@
-# X Bookmarks Extractor - Browser Extension
+# X Bookmarks Analyzer - Browser Extension
 
-![Version](https://img.shields.io/badge/version-0.5.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
+![Version](https://img.shields.io/badge/version-0.6.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
 
-Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—just simple, robust, and accessible bookmark extraction.
+Extract and analyze your X (Twitter) bookmarks with AI-powered insights. Get summaries, tags, and categories to understand your bookmarked content better. Export as Markdown or CSV with AI analysis included.
 
 ## 📋 Changelog
+
+### Version 0.6.0 (Beta) - November 2025
+#### New Features
+- **AI-Powered Analysis**: Automatically analyze your bookmarks with OpenAI
+- **Smart Summaries**: Get an overall summary of your bookmark collection's themes
+- **Automatic Tagging**: AI generates relevant tags/keywords for your bookmarks
+- **Category Detection**: Automatically categorize bookmarks into main themes
+- **Enhanced Exports**: Markdown and CSV exports now include AI analysis results
+- **Settings Dialog**: Configure your OpenAI API key securely
+- **Manual Analysis**: Trigger AI analysis on-demand with a dedicated button
+
+#### Improvements
+- Fixed duplicate code issues in popup.js
+- Improved error handling and user feedback
+- Better UI organization with AI analysis section
+- Updated extension description and branding
 
 ### Version 0.5.0 (Beta) - July 2025
 #### Features
@@ -34,13 +50,21 @@ Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—
 - **Go to Bookmarks Page**: Quickly open your X/Twitter bookmarks page.
 - **Scan Bookmarks**: Extract all tweet URLs from your X Bookmarks page with one click.
 - **Auto-Scroll & Scan All**: Automatically scrolls your bookmarks page to load and extract all bookmarks, even for large accounts.
-- **Download as Markdown**: Export your bookmarks as a clean Markdown list for easy reference or note-taking.
-- **Download as CSV**: Export your bookmarks in a spreadsheet-friendly format.
-- **Copy to Clipboard**: Instantly copy your bookmarks in Markdown format to your clipboard, with a robust fallback if permissions are denied.
+- **AI-Powered Analysis**: Analyze your bookmarks with OpenAI to discover themes, tags, and categories.
+  - **Overall Summary**: Get a 2-3 sentence summary of main themes in your bookmarks
+  - **Smart Tags**: Automatically generate 5-10 relevant keywords/tags
+  - **Categories**: Identify 3-5 main categories your bookmarks fall into
+  - **Automatic Analysis**: AI analysis runs automatically after scanning (if API key is configured)
+  - **Manual Control**: Trigger analysis on-demand with the "Analyze with AI" button
+- **Enhanced Exports**: Export your bookmarks with AI insights included
+  - **Download as Markdown**: Export bookmarks with AI analysis at the top
+  - **Download as CSV**: Spreadsheet format with tags and categories columns
+  - **Copy to Clipboard**: Copy formatted Markdown including AI insights
+- **Settings Management**: Configure your OpenAI API key through a user-friendly settings dialog
 - **Status Bar Feedback**: All actions provide clear, accessible feedback at the top of the popup—no intrusive popups.
 - **Accessibility First**: Full keyboard navigation, ARIA labels, visible focus outlines, and screen reader support.
 - **Large Bookmark Set Warning**: If you have more than 500 bookmarks, you'll be warned to consider exporting in batches.
-- **Privacy First**: No data leaves your browser. No API keys, no external servers, no analysis—just your bookmarks.
+- **Privacy Conscious**: Bookmark extraction happens locally. AI analysis is optional and requires your own OpenAI API key.
 
 ### Coming Soon
 
@@ -118,17 +142,30 @@ Extract and export your X (Twitter) bookmarks as Markdown. No AI, no API keys—
 
 ## 📖 How to Use
 
-1. **Go to Bookmarks Page**
-   - Click the "Go to Bookmarks Page" button in the popup. It opens `https://x.com/i/bookmarks` in your current tab (or a new one if needed).
-2. **Scan Bookmarks**
-   - Make sure you're on the X Bookmarks page (`https://x.com/i/bookmarks`).
-   - Click "Scan Bookmarks" to extract all tweet URLs currently loaded on the page.
-3. **Auto-Scroll & Scan All**
-   - For large accounts, click "Auto-Scroll & Scan All" to automatically scroll and load all bookmarks, then extract them.
-4. **Export or Copy**
-   - Click "Download .md" to save your bookmarks as a Markdown file.
-   - Click "Download .csv" to save your bookmarks as a CSV file.
-   - Or click "Copy to Clipboard" to copy the Markdown list for pasting anywhere. If clipboard permissions are denied, the extension will select the text for you to copy manually.
+1. **Configure AI (Optional)**
+   - Click the settings icon (⚙️) in the bottom right
+   - Enter your OpenAI API key
+   - Get your key from [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Click "Save"
+
+2. **Go to Bookmarks Page**
+   - Click the "Go to Bookmarks Page" button in the popup
+   - This opens `https://x.com/i/bookmarks` in your current tab
+
+3. **Scan Bookmarks**
+   - Make sure you're on the X Bookmarks page (`https://x.com/i/bookmarks`)
+   - Click "Scan Bookmarks" to extract all currently loaded bookmarks
+   - Or click "Auto-Scroll & Scan All" for automatic scrolling and complete extraction
+
+4. **Analyze with AI (Optional)**
+   - If you configured an API key, analysis runs automatically after scanning
+   - Or click "Analyze with AI" button to manually trigger analysis
+   - View the generated summary, tags, and categories in the results panel
+
+5. **Export or Copy**
+   - Click "Download .md" to save as a Markdown file (includes AI analysis)
+   - Click "Download .csv" to save as a CSV file (includes tags and categories)
+   - Or click "Copy to Clipboard" to copy the formatted Markdown with AI insights
 
 ## 🛠️ Development
 
@@ -363,9 +400,19 @@ x-bookmarks-extractor-extension/
 ## 🔒 Privacy & Security
 
 - **Local Processing**: All bookmark extraction happens in your browser
-- **No Data Collection**: Extension doesn't collect or transmit personal data
-- **No API Keys**: No configuration or external services required
-- **Minimal Permissions**: Only `tabs`, `activeTab`, `clipboardWrite`, and `scripting` are used
+- **Optional AI**: AI analysis is completely optional and requires your own API key
+- **Your API Key**: OpenAI API key is stored locally in your browser only
+- **No Data Collection**: Extension doesn't collect or transmit your personal data
+- **Transparent**: AI analysis only happens when you explicitly enable it
+- **Control**: You can use the extension without AI features at all
+- **Minimal Permissions**: Only `tabs`, `activeTab`, `clipboardWrite`, `scripting`, and `storage` are used
+
+### AI Features & Costs
+- AI analysis uses your own OpenAI API key
+- Analysis is limited to the first 50 bookmarks for cost efficiency
+- Uses GPT-3.5-turbo model (approximately $0.002 per analysis)
+- You control when and if AI analysis runs
+- All AI processing happens through OpenAI's API (see their [privacy policy](https://openai.com/policies/privacy-policy))
 
 ## 🐛 Known Issues and Limitations
 
@@ -405,12 +452,23 @@ x-bookmarks-extractor-extension/
 
 ## 🐛 Troubleshooting
 
-- Make sure you are on the X Bookmarks page (`https://x.com/i/bookmarks`) when scanning.
-- If scanning fails, refresh the page and try again.
-- If you see no results, scroll down to load more bookmarks or use "Auto-Scroll & Scan All".
-- If clipboard copy fails, the extension will select the text for you—just press `Ctrl+C` or `Cmd+C` to copy manually.
-- If you have more than 500 bookmarks, consider exporting in batches for best performance.
-- All errors and statuses are shown in the status bar at the top of the popup.
+### Bookmark Scanning Issues
+- Make sure you are on the X Bookmarks page (`https://x.com/i/bookmarks`) when scanning
+- If scanning fails, refresh the page and try again
+- If you see no results, scroll down to load more bookmarks or use "Auto-Scroll & Scan All"
+- If you have more than 500 bookmarks, consider exporting in batches for best performance
+
+### AI Analysis Issues
+- **"No API key configured"**: Click the settings icon and add your OpenAI API key
+- **"Analysis failed: 401"**: Your API key is invalid or expired. Get a new key from OpenAI
+- **"Analysis failed: 429"**: Rate limit exceeded. Wait a moment and try again
+- **"No bookmark content to analyze"**: Make sure your bookmarks contain text content
+- **Slow analysis**: Analysis processes up to 50 bookmarks and may take 5-10 seconds
+
+### Export Issues
+- If clipboard copy fails, the extension will select the text for you—just press `Ctrl+C` or `Cmd+C` to copy manually
+- CSV exports include AI columns only if analysis has been run
+- All errors and statuses are shown in the status bar at the top of the popup
 
 ## ♿ Accessibility
 
@@ -421,7 +479,28 @@ x-bookmarks-extractor-extension/
 
 ## 📝 Version History
 
-### v0.5.0 (Beta) - Current
+### v0.6.0 (Beta) - Current
+#### Major Features
+- AI-powered bookmark analysis with OpenAI integration
+- Automatic summary generation for bookmark collections
+- Smart tag and category detection
+- Enhanced exports with AI insights
+- Settings dialog for API key management
+- Manual and automatic analysis modes
+
+#### Bug Fixes
+- Fixed duplicate constructor issue in popup.js
+- Improved error handling throughout the application
+- Better status feedback for all operations
+
+#### Technical Changes
+- Added AIAnalysisService class for OpenAI integration
+- Implemented secure local storage for API keys
+- Enhanced UI with AI analysis results display
+- Updated CSS for better visual hierarchy
+- Improved code organization and maintainability
+
+### v0.5.0 (Beta)
 #### Core Features
 - Initial public beta release with stable extraction engine
 - Two scanning modes: quick scan and auto-scroll
