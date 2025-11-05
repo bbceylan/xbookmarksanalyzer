@@ -1,4 +1,4 @@
-// X Bookmarks Analyzer with AI - Popup Script v0.6.0
+// X Bookmarks Analyzer with AI - Popup Script v0.7.0
 
 class PopupController {
   constructor() {
@@ -17,6 +17,7 @@ class PopupController {
       isDarkMode: false,
       aiAnalysis: null,
       apiKey: '',
+      llmProvider: 'none', // 'openai', 'anthropic', 'none'
       progress: {
         current: 0,
         total: 0,
@@ -66,13 +67,16 @@ class PopupController {
   };
 
   loadSettings = async () => {
-    const settings = await chrome.storage.local.get(['settings', 'apiKey']);
+    const settings = await chrome.storage.local.get(['settings', 'apiKey', 'llmProvider']);
     if (settings.settings) {
       this.state.isDarkMode = settings.settings.darkMode || false;
       this.updateTheme();
     }
     if (settings.apiKey) {
       this.state.apiKey = settings.apiKey;
+    }
+    if (settings.llmProvider) {
+      this.state.llmProvider = settings.llmProvider;
     }
   };
 
@@ -84,7 +88,7 @@ class PopupController {
     });
   };
 
-  validateApiKey = (apiKey) => {
+  validateApiKey = (apiKey, provider) => {
     if (!apiKey || typeof apiKey !== 'string') {
       return { valid: false, error: 'API key is required' };
     }
@@ -96,9 +100,17 @@ class PopupController {
       return { valid: false, error: 'API key cannot be empty' };
     }
 
-    // OpenAI API keys start with 'sk-' and are typically 40+ characters
-    if (!trimmedKey.startsWith('sk-')) {
-      return { valid: false, error: 'Invalid API key format. OpenAI keys start with "sk-"' };
+    // Provider-specific validation
+    if (provider === 'openai') {
+      // OpenAI API keys start with 'sk-' and are typically 40+ characters
+      if (!trimmedKey.startsWith('sk-')) {
+        return { valid: false, error: 'Invalid API key format. OpenAI keys start with "sk-"' };
+      }
+    } else if (provider === 'anthropic') {
+      // Anthropic API keys start with 'sk-ant-'
+      if (!trimmedKey.startsWith('sk-ant-')) {
+        return { valid: false, error: 'Invalid API key format. Anthropic keys start with "sk-ant-"' };
+      }
     }
 
     if (trimmedKey.length < this.constants.API_KEY_MIN_LENGTH) {
@@ -331,9 +343,15 @@ class PopupController {
 
     this.updateUI();
 
-    // Automatically analyze with AI if API key is set
-    if (this.state.apiKey && bookmarks.length > 0) {
-      this.analyzeBookmarks();
+    // Automatically analyze with AI if provider is configured and API key is set (or if using LLM-free mode)
+    if (bookmarks.length > 0) {
+      if (this.state.llmProvider === 'none') {
+        // Auto-analyze with LLM-free mode
+        this.analyzeBookmarks();
+      } else if (this.state.apiKey && this.state.llmProvider !== 'none') {
+        // Auto-analyze with configured LLM provider
+        this.analyzeBookmarks();
+      }
     }
   };
 
@@ -411,13 +429,20 @@ class PopupController {
   };
 
   analyzeBookmarks = async () => {
-    if (!this.state.apiKey) {
-      this.updateStatus('No API key configured. Click settings to add one.');
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      this.updateStatus('No bookmarks to analyze.');
       return;
     }
 
-    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
-      this.updateStatus('No bookmarks to analyze.');
+    // Check if LLM provider is configured
+    if (this.state.llmProvider === 'none') {
+      // Use LLM-free analysis
+      this.analyzeLLMFree();
+      return;
+    }
+
+    if (!this.state.apiKey && this.state.llmProvider !== 'none') {
+      this.updateStatus('No API key configured. Click settings to add one or use LLM-free mode.');
       return;
     }
 
@@ -429,14 +454,14 @@ class PopupController {
     const analyzeCount = Math.min(bookmarkCount, this.constants.AI_ANALYSIS_LIMIT);
 
     if (bookmarkCount > this.constants.AI_ANALYSIS_LIMIT) {
-      this.updateStatus(`Analyzing first ${analyzeCount} of ${bookmarkCount} bookmarks with AI...`);
+      this.updateStatus(`Analyzing first ${analyzeCount} of ${bookmarkCount} bookmarks...`);
     } else {
-      this.updateStatus(`Analyzing ${analyzeCount} bookmarks with AI...`);
+      this.updateStatus(`Analyzing ${analyzeCount} bookmarks...`);
     }
 
     try {
-      const aiService = new AIAnalysisService(this.state.apiKey, this.constants);
-      const analysis = await aiService.analyzeBookmarks(this.state.lastExtraction);
+      const provider = this.createLLMProvider();
+      const analysis = await provider.analyzeBookmarks(this.state.lastExtraction);
 
       this.state.aiAnalysis = analysis;
       await chrome.storage.local.set({ aiAnalysis: analysis });
@@ -454,7 +479,46 @@ class PopupController {
     } finally {
       // Reset button state
       this.elements.analyzeAiBtn.disabled = false;
-      this.elements.analyzeAiBtn.textContent = 'Analyze with AI';
+      this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+    }
+  };
+
+  createLLMProvider = () => {
+    switch (this.state.llmProvider) {
+      case 'openai':
+        return new OpenAIProvider(this.state.apiKey, this.constants);
+      case 'anthropic':
+        return new AnthropicProvider(this.state.apiKey, this.constants);
+      case 'none':
+      default:
+        return new LLMFreeProvider(this.constants);
+    }
+  };
+
+  analyzeLLMFree = async () => {
+    // Show loading state
+    this.elements.analyzeAiBtn.disabled = true;
+    this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+
+    const bookmarkCount = this.state.lastExtraction.length;
+    this.updateStatus(`Analyzing ${bookmarkCount} bookmarks (LLM-free mode)...`);
+
+    try {
+      const provider = new LLMFreeProvider(this.constants);
+      const analysis = await provider.analyzeBookmarks(this.state.lastExtraction);
+
+      this.state.aiAnalysis = analysis;
+      await chrome.storage.local.set({ aiAnalysis: analysis });
+
+      this.updateStatus(`Analysis complete! Found ${analysis.tags.length} tags and ${analysis.categories.length} categories.`);
+      this.showAnalysisResults(analysis);
+    } catch (error) {
+      console.error('Analysis error:', error);
+      this.updateStatus(`Analysis failed: ${error.message}`);
+    } finally {
+      // Reset button state
+      this.elements.analyzeAiBtn.disabled = false;
+      this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
     }
   };
 
@@ -595,20 +659,40 @@ class PopupController {
       background: var(--bg-color);
       padding: 24px;
       border-radius: 8px;
-      max-width: 400px;
+      max-width: 450px;
       width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    `;
+
+    const providerOptions = `
+      <option value="none" ${this.state.llmProvider === 'none' ? 'selected' : ''}>None (LLM-free mode)</option>
+      <option value="openai" ${this.state.llmProvider === 'openai' ? 'selected' : ''}>OpenAI</option>
+      <option value="anthropic" ${this.state.llmProvider === 'anthropic' ? 'selected' : ''}>Anthropic (Claude)</option>
     `;
 
     dialogContent.innerHTML = `
       <h2 id="settings-dialog-title" style="margin-top: 0; color: var(--text-color);">Settings</h2>
+
       <div style="margin-bottom: 16px;">
         <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
-          AI API Key (OpenAI):
+          Analysis Provider:
+          <select id="providerSelect" style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+            ${providerOptions}
+          </select>
+        </label>
+        <small style="color: var(--disabled-color);">Choose an LLM provider or use LLM-free mode for basic analysis</small>
+      </div>
+
+      <div id="apiKeySection" style="margin-bottom: 16px; ${this.state.llmProvider === 'none' ? 'display: none;' : ''}">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          <span id="apiKeyLabel">API Key:</span>
           <input type="password" id="apiKeyInput" value="${this.state.apiKey}"
                  style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
         </label>
-        <small style="color: var(--disabled-color);">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" style="color: var(--primary-color);">OpenAI</a></small>
+        <small id="apiKeyHelp" style="color: var(--disabled-color);"></small>
       </div>
+
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;">Cancel</button>
         <button id="saveBtn" style="padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;">Save</button>
@@ -617,6 +701,35 @@ class PopupController {
 
     dialog.appendChild(dialogContent);
     document.body.appendChild(dialog);
+
+    // Update API key section based on provider selection
+    const updateApiKeySection = (provider) => {
+      const apiKeySection = document.getElementById('apiKeySection');
+      const apiKeyLabel = document.getElementById('apiKeyLabel');
+      const apiKeyHelp = document.getElementById('apiKeyHelp');
+
+      if (provider === 'none') {
+        apiKeySection.style.display = 'none';
+      } else {
+        apiKeySection.style.display = 'block';
+        if (provider === 'openai') {
+          apiKeyLabel.textContent = 'OpenAI API Key:';
+          apiKeyHelp.innerHTML = 'Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" style="color: var(--primary-color);">OpenAI</a>';
+        } else if (provider === 'anthropic') {
+          apiKeyLabel.textContent = 'Anthropic API Key:';
+          apiKeyHelp.innerHTML = 'Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color: var(--primary-color);">Anthropic Console</a>';
+        }
+      }
+    };
+
+    // Initialize API key section
+    const providerSelect = document.getElementById('providerSelect');
+    updateApiKeySection(providerSelect.value);
+
+    // Handle provider selection change
+    providerSelect.addEventListener('change', (e) => {
+      updateApiKeySection(e.target.value);
+    });
 
     // Store currently focused element to restore later
     const previouslyFocused = document.activeElement;
@@ -678,11 +791,12 @@ class PopupController {
     document.getElementById('cancelBtn').addEventListener('click', closeDialog);
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
+      const provider = document.getElementById('providerSelect').value;
       const apiKey = document.getElementById('apiKeyInput').value.trim();
 
-      // Validate API key before saving (allow empty to clear)
-      if (apiKey.length > 0) {
-        const validation = this.validateApiKey(apiKey);
+      // Validate API key before saving (only if provider requires it)
+      if (provider !== 'none' && apiKey.length > 0) {
+        const validation = this.validateApiKey(apiKey, provider);
         if (!validation.valid) {
           // Show error in dialog
           const existingError = document.getElementById('apiKeyError');
@@ -702,8 +816,15 @@ class PopupController {
         }
       }
 
-      await this.saveApiKey(apiKey);
-      this.updateStatus(apiKey.length > 0 ? 'Settings saved!' : 'API key cleared');
+      // Save provider and API key
+      this.state.llmProvider = provider;
+      await chrome.storage.local.set({ llmProvider: provider });
+
+      if (provider !== 'none') {
+        await this.saveApiKey(apiKey);
+      }
+
+      this.updateStatus('Settings saved!');
       closeDialog();
     });
 
@@ -728,11 +849,28 @@ class PopupController {
   generateMarkdown = () => {
     if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) return '';
 
-    let md = '# X Bookmarks Export\n\n';
+    const bookmarks = this.state.lastExtraction;
+    const exportDate = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    let md = `# X Bookmarks Export\n\n`;
+    md += `**Exported:** ${exportDate}\n`;
+    md += `**Total Bookmarks:** ${bookmarks.length}\n\n`;
+
+    // Add basic statistics
+    const stats = this.calculateBasicStats(bookmarks);
+    md += `## Statistics\n\n`;
+    md += `- **Total Engagement:** ${stats.totalLikes + stats.totalRetweets} interactions\n`;
+    md += `- **Average Likes:** ${Math.round(stats.avgLikes)}\n`;
+    md += `- **Top Author:** @${stats.topAuthor.username || 'N/A'} (${stats.topAuthor.count} bookmarks)\n`;
+    md += `- **Date Range:** ${stats.dateRange}\n\n`;
 
     // Add AI analysis if available
     if (this.state.aiAnalysis) {
-      md += '## AI Analysis\n\n';
+      md += `## Analysis\n\n`;
       if (this.state.aiAnalysis.overallSummary) {
         md += `**Summary:** ${this.state.aiAnalysis.overallSummary}\n\n`;
       }
@@ -742,19 +880,82 @@ class PopupController {
       if (this.state.aiAnalysis.categories && this.state.aiAnalysis.categories.length > 0) {
         md += `**Categories:**\n${this.state.aiAnalysis.categories.map(c => `- ${c}`).join('\n')}\n\n`;
       }
-      md += '---\n\n';
+      md += `---\n\n`;
     }
 
-    md += '## Bookmarks\n\n';
-    md += `| Author | Username | Date | Text | Likes | Retweets | Replies | Views | Link |\n`;
-    md += `|--------|----------|------|------|-------|----------|---------|-------|------|\n`;
+    md += `## Bookmarks\n\n`;
 
-    this.state.lastExtraction.forEach(t => {
-      const safeText = (t.text || '').replace(/\|/g, '\\|').replace(/\n/g, ' ').substring(0, 100);
-      md += `| ${t.displayName || ''} | @${t.username || ''} | ${t.dateTime || ''} | ${safeText} | ${t.likes || ''} | ${t.retweets || ''} | ${t.replies || ''} | ${t.views || ''} | [Link](${t.url}) |\n`;
+    // Use a more readable format instead of a table
+    bookmarks.forEach((bookmark, index) => {
+      md += `### ${index + 1}. ${bookmark.displayName || 'Unknown'} (@${bookmark.username || 'unknown'})\n\n`;
+
+      if (bookmark.text) {
+        md += `${bookmark.text}\n\n`;
+      }
+
+      md += `**Stats:** ${bookmark.likes || '0'} likes • ${bookmark.retweets || '0'} retweets • ${bookmark.replies || '0'} replies`;
+      if (bookmark.views) {
+        md += ` • ${bookmark.views} views`;
+      }
+      md += `\n\n`;
+
+      if (bookmark.dateTime) {
+        const date = new Date(bookmark.dateTime);
+        md += `**Date:** ${date.toLocaleString()}\n\n`;
+      }
+
+      md += `**Link:** ${bookmark.url}\n\n`;
+      md += `---\n\n`;
     });
 
     return md;
+  };
+
+  calculateBasicStats = (bookmarks) => {
+    let totalLikes = 0;
+    let totalRetweets = 0;
+    const authorCounts = {};
+    let minDate = null;
+    let maxDate = null;
+
+    bookmarks.forEach(b => {
+      totalLikes += parseInt(b.likes || 0);
+      totalRetweets += parseInt(b.retweets || 0);
+
+      if (b.username) {
+        authorCounts[b.username] = (authorCounts[b.username] || 0) + 1;
+      }
+
+      if (b.dateTime) {
+        const date = new Date(b.dateTime);
+        if (!minDate || date < minDate) minDate = date;
+        if (!maxDate || date > maxDate) maxDate = date;
+      }
+    });
+
+    const avgLikes = bookmarks.length > 0 ? totalLikes / bookmarks.length : 0;
+
+    let topAuthor = { username: null, count: 0 };
+    Object.entries(authorCounts).forEach(([username, count]) => {
+      if (count > topAuthor.count) {
+        topAuthor = { username, count };
+      }
+    });
+
+    let dateRange = 'N/A';
+    if (minDate && maxDate) {
+      const minStr = minDate.toLocaleDateString();
+      const maxStr = maxDate.toLocaleDateString();
+      dateRange = minStr === maxStr ? minStr : `${minStr} - ${maxStr}`;
+    }
+
+    return {
+      totalLikes,
+      totalRetweets,
+      avgLikes,
+      topAuthor,
+      dateRange
+    };
   };
 
   generateCSV = () => {
@@ -891,28 +1092,95 @@ class PopupController {
   };
 }
 
-// AI Analysis Service
-class AIAnalysisService {
-  constructor(apiKey, constants) {
-    this.apiKey = apiKey;
-    this.apiUrl = 'https://api.openai.com/v1/chat/completions';
+// LLM Provider Base Class
+class LLMProvider {
+  constructor(constants) {
     this.constants = constants || {
       AI_ANALYSIS_LIMIT: 50,
       AI_MAX_TOKENS: 500,
       AI_TEMPERATURE: 0.7,
-      AI_MODEL: 'gpt-3.5-turbo',
       MAX_TAGS: 20,
       MAX_CATEGORIES: 10
     };
   }
 
-  async analyzeBookmarks(bookmarks) {
-    // Prepare bookmark data for analysis
-    const bookmarkTexts = bookmarks
+  prepareBookmarkTexts(bookmarks) {
+    return bookmarks
       .filter(b => b.text && b.text.trim())
       .slice(0, this.constants.AI_ANALYSIS_LIMIT)
       .map(b => `@${b.username}: ${b.text}`)
       .join('\n\n');
+  }
+
+  parseJSONResponse(content) {
+    let analysis = null;
+
+    // Strategy 1: Try parsing entire content as JSON
+    try {
+      analysis = JSON.parse(content);
+      return analysis;
+    } catch (e) {
+      // Strategy 2: Extract JSON from markdown code blocks
+      const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+      if (codeBlockMatch) {
+        try {
+          analysis = JSON.parse(codeBlockMatch[1]);
+          return analysis;
+        } catch (e2) {
+          // Continue to next strategy
+        }
+      }
+
+      // Strategy 3: Find first JSON object in content
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          analysis = JSON.parse(jsonMatch[0]);
+          return analysis;
+        } catch (e3) {
+          throw new Error('Failed to parse response as JSON');
+        }
+      } else {
+        throw new Error('No JSON found in response');
+      }
+    }
+  }
+
+  validateAnalysis(analysis) {
+    if (!analysis || typeof analysis !== 'object') {
+      throw new Error('Analysis is not a valid object');
+    }
+
+    const validatedAnalysis = {
+      overallSummary: typeof analysis.overallSummary === 'string' ? analysis.overallSummary : '',
+      tags: Array.isArray(analysis.tags) ? analysis.tags.filter(t => typeof t === 'string').slice(0, this.constants.MAX_TAGS) : [],
+      categories: Array.isArray(analysis.categories) ? analysis.categories.filter(c => typeof c === 'string').slice(0, this.constants.MAX_CATEGORIES) : [],
+      timestamp: Date.now()
+    };
+
+    if (!validatedAnalysis.overallSummary && validatedAnalysis.tags.length === 0 && validatedAnalysis.categories.length === 0) {
+      throw new Error('Response contained no useful analysis data');
+    }
+
+    return validatedAnalysis;
+  }
+
+  async analyzeBookmarks(bookmarks) {
+    throw new Error('analyzeBookmarks must be implemented by subclass');
+  }
+}
+
+// OpenAI Provider
+class OpenAIProvider extends LLMProvider {
+  constructor(apiKey, constants) {
+    super(constants);
+    this.apiKey = apiKey;
+    this.apiUrl = 'https://api.openai.com/v1/chat/completions';
+    this.model = 'gpt-3.5-turbo';
+  }
+
+  async analyzeBookmarks(bookmarks) {
+    const bookmarkTexts = this.prepareBookmarkTexts(bookmarks);
 
     if (!bookmarkTexts) {
       throw new Error('No bookmark content to analyze');
@@ -941,7 +1209,7 @@ Respond in JSON format:
           'Authorization': `Bearer ${this.apiKey}`
         },
         body: JSON.stringify({
-          model: this.constants.AI_MODEL,
+          model: this.model,
           messages: [
             {
               role: 'system',
@@ -958,13 +1226,12 @@ Respond in JSON format:
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error?.message || `API error: ${response.status}`);
       }
 
       const data = await response.json();
 
-      // Validate response structure
       if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
         throw new Error('Invalid API response structure');
       }
@@ -974,62 +1241,180 @@ Respond in JSON format:
       }
 
       const content = data.choices[0].message.content;
-
-      // Parse JSON response - try multiple strategies
-      let analysis = null;
-
-      // Strategy 1: Try parsing entire content as JSON
-      try {
-        analysis = JSON.parse(content);
-      } catch (e) {
-        // Strategy 2: Extract JSON from markdown code blocks
-        const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-        if (codeBlockMatch) {
-          try {
-            analysis = JSON.parse(codeBlockMatch[1]);
-          } catch (e2) {
-            // Continue to next strategy
-          }
-        }
-
-        // Strategy 3: Find first JSON object in content
-        if (!analysis) {
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              analysis = JSON.parse(jsonMatch[0]);
-            } catch (e3) {
-              throw new Error('Failed to parse AI response as JSON');
-            }
-          } else {
-            throw new Error('No JSON found in AI response');
-          }
-        }
-      }
-
-      // Validate analysis structure
-      if (!analysis || typeof analysis !== 'object') {
-        throw new Error('Analysis is not a valid object');
-      }
-
-      // Ensure required fields with safe defaults
-      const validatedAnalysis = {
-        overallSummary: typeof analysis.overallSummary === 'string' ? analysis.overallSummary : '',
-        tags: Array.isArray(analysis.tags) ? analysis.tags.filter(t => typeof t === 'string').slice(0, this.constants.MAX_TAGS) : [],
-        categories: Array.isArray(analysis.categories) ? analysis.categories.filter(c => typeof c === 'string').slice(0, this.constants.MAX_CATEGORIES) : [],
-        timestamp: Date.now()
-      };
-
-      // Validate we got at least something useful
-      if (!validatedAnalysis.overallSummary && validatedAnalysis.tags.length === 0 && validatedAnalysis.categories.length === 0) {
-        throw new Error('AI response contained no useful analysis data');
-      }
-
-      return validatedAnalysis;
+      const analysis = this.parseJSONResponse(content);
+      return this.validateAnalysis(analysis);
     } catch (error) {
-      console.error('AI Analysis error:', error);
+      console.error('OpenAI Analysis error:', error);
       throw error;
     }
+  }
+}
+
+// Anthropic Provider
+class AnthropicProvider extends LLMProvider {
+  constructor(apiKey, constants) {
+    super(constants);
+    this.apiKey = apiKey;
+    this.apiUrl = 'https://api.anthropic.com/v1/messages';
+    this.model = 'claude-3-5-sonnet-20241022';
+  }
+
+  async analyzeBookmarks(bookmarks) {
+    const bookmarkTexts = this.prepareBookmarkTexts(bookmarks);
+
+    if (!bookmarkTexts) {
+      throw new Error('No bookmark content to analyze');
+    }
+
+    const prompt = `Analyze these Twitter/X bookmarks and provide:
+1. An overall summary (2-3 sentences) of the main themes
+2. A list of 5-10 relevant tags/keywords
+3. 3-5 main categories these bookmarks fall into
+
+Bookmarks:
+${bookmarkTexts}
+
+Respond in JSON format:
+{
+  "overallSummary": "...",
+  "tags": ["tag1", "tag2", ...],
+  "categories": ["category1", "category2", ...]
+}`;
+
+    try {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: this.model,
+          max_tokens: this.constants.AI_MAX_TOKENS,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.content || !Array.isArray(data.content) || data.content.length === 0) {
+        throw new Error('Invalid API response structure');
+      }
+
+      const content = data.content[0].text;
+      const analysis = this.parseJSONResponse(content);
+      return this.validateAnalysis(analysis);
+    } catch (error) {
+      console.error('Anthropic Analysis error:', error);
+      throw error;
+    }
+  }
+}
+
+// LLM-Free Provider (Basic Analysis)
+class LLMFreeProvider extends LLMProvider {
+  constructor(constants) {
+    super(constants);
+  }
+
+  async analyzeBookmarks(bookmarks) {
+    // Perform basic text analysis without external LLM
+    if (!bookmarks || bookmarks.length === 0) {
+      throw new Error('No bookmark content to analyze');
+    }
+
+    // Extract common words for tags
+    const wordFrequency = {};
+    const authorFrequency = {};
+    const allText = [];
+
+    bookmarks.forEach(b => {
+      if (b.text) {
+        allText.push(b.text.toLowerCase());
+        // Extract words (simple tokenization)
+        const words = b.text.toLowerCase()
+          .replace(/[^\w\s#@]/g, ' ')
+          .split(/\s+/)
+          .filter(w => w.length > 3 && !this.isStopWord(w));
+
+        words.forEach(word => {
+          wordFrequency[word] = (wordFrequency[word] || 0) + 1;
+        });
+      }
+
+      if (b.username) {
+        authorFrequency[b.username] = (authorFrequency[b.username] || 0) + 1;
+      }
+    });
+
+    // Get top tags (most frequent words)
+    const tags = Object.entries(wordFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([word]) => word);
+
+    // Detect categories based on keywords
+    const categories = this.detectCategories(allText.join(' '));
+
+    // Generate basic summary
+    const topAuthor = Object.entries(authorFrequency)
+      .sort((a, b) => b[1] - a[1])[0];
+
+    const summary = `This collection contains ${bookmarks.length} bookmarks. ` +
+      `Most frequently bookmarked author: @${topAuthor ? topAuthor[0] : 'N/A'}. ` +
+      `Common topics include: ${tags.slice(0, 3).join(', ')}.`;
+
+    return {
+      overallSummary: summary,
+      tags: tags,
+      categories: categories,
+      timestamp: Date.now()
+    };
+  }
+
+  isStopWord(word) {
+    const stopWords = ['that', 'this', 'with', 'from', 'have', 'will', 'your', 'they', 'been', 'more', 'when', 'there', 'their', 'would', 'about', 'which', 'these', 'https'];
+    return stopWords.includes(word);
+  }
+
+  detectCategories(text) {
+    const categories = [];
+    const lowerText = text.toLowerCase();
+
+    const categoryKeywords = {
+      'Technology': ['tech', 'software', 'code', 'programming', 'developer', 'ai', 'data', 'cloud', 'api'],
+      'Business': ['business', 'startup', 'entrepreneur', 'market', 'company', 'revenue', 'growth'],
+      'News & Politics': ['news', 'political', 'government', 'election', 'policy', 'breaking'],
+      'Science': ['science', 'research', 'study', 'paper', 'scientific', 'discovery'],
+      'Entertainment': ['movie', 'music', 'game', 'entertainment', 'show', 'video'],
+      'Sports': ['sport', 'team', 'player', 'game', 'match', 'football', 'basketball'],
+      'Education': ['learn', 'education', 'course', 'tutorial', 'teaching', 'university'],
+      'Health': ['health', 'medical', 'wellness', 'fitness', 'mental', 'exercise']
+    };
+
+    for (const [category, keywords] of Object.entries(categoryKeywords)) {
+      const matches = keywords.filter(keyword => lowerText.includes(keyword)).length;
+      if (matches >= 2) {
+        categories.push(category);
+      }
+    }
+
+    if (categories.length === 0) {
+      categories.push('General');
+    }
+
+    return categories.slice(0, 5);
   }
 }
 
