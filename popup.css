@@ -453,6 +453,98 @@ button:focus, input:focus, textarea:focus {
   100% { transform: rotate(360deg); }
 }
 
+/* AI Analysis Section */
+.ai-group {
+  margin: 16px 0;
+}
+
+.ai-button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.ai-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5568d3 0%, #66398d 100%);
+}
+
+.ai-button:disabled {
+  background: var(--border-color);
+  color: var(--disabled-color);
+  cursor: not-allowed;
+}
+
+.action-button {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary-color);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-button:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.action-button:disabled {
+  background: var(--border-color);
+  color: var(--disabled-color);
+  cursor: not-allowed;
+}
+
+.export-button {
+  flex: 1;
+  padding: 10px;
+  margin: 4px;
+  border: none;
+  border-radius: 6px;
+  background: var(--primary-color);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.export-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.export-button:disabled {
+  background: var(--border-color);
+  color: var(--disabled-color);
+  cursor: not-allowed;
+}
+
+.export-group {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.action-group {
+  margin: 16px 0;
+}
+
+.settings-group {
+  margin: 16px 0;
+}
+
+.danger {
+  background: var(--danger-color) !important;
+}
+
+.danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
 @media (max-width: 450px) {
   body {
     min-width: 320px;
