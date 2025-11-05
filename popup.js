@@ -149,7 +149,7 @@ class PopupController {
   };
 
   loadLastExtraction = async () => {
-    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis']);
+    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis', 'performanceMetrics']);
     if (result.lastExtraction) {
       this.state.lastExtraction = result.lastExtraction.bookmarks;
       this.updateExtractionStatus(result.lastExtraction.timestamp);
@@ -157,6 +157,9 @@ class PopupController {
     }
     if (result.aiAnalysis) {
       this.state.aiAnalysis = result.aiAnalysis;
+    }
+    if (result.performanceMetrics) {
+      this.state.performanceMetrics = result.performanceMetrics;
     }
   };
 
@@ -197,9 +200,8 @@ class PopupController {
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'progressUpdate') {
         this.handleProgressUpdate(msg.progress);
-      } else if (msg.type === 'scanComplete') {
-        this.handleScanComplete(msg.bookmarks);
       }
+      // Note: scanComplete is handled via sendResponse callback, not as a message
     });
   };
 
@@ -221,9 +223,15 @@ class PopupController {
     const { current, total } = this.state.progress;
     if (total > 0) {
       const percent = Math.round((current / total) * 100);
-      this.elements.progressFill.style.width = `${percent}%`;
-      this.elements.progressText.textContent = `${current} / ${total} bookmarks`;
-      this.elements.progressBar.style.display = 'block';
+      if (this.elements.progressFill) {
+        this.elements.progressFill.style.width = `${percent}%`;
+      }
+      if (this.elements.progressText) {
+        this.elements.progressText.textContent = `${current} / ${total} bookmarks`;
+      }
+      if (this.elements.progressBar) {
+        this.elements.progressBar.style.display = 'block';
+      }
 
       // Update ARIA attributes for accessibility
       const progressBarEl = document.getElementById('progress-bar');
@@ -232,7 +240,9 @@ class PopupController {
         progressBarEl.setAttribute('aria-valuetext', `${current} of ${total} bookmarks processed`);
       }
     } else {
-      this.elements.progressBar.style.display = 'none';
+      if (this.elements.progressBar) {
+        this.elements.progressBar.style.display = 'none';
+      }
     }
   };
 
@@ -241,11 +251,15 @@ class PopupController {
   };
 
   updateStatus = (message) => {
-    this.elements.statusBar.textContent = message;
-    this.elements.statusBar.setAttribute('aria-label', message);
+    if (this.elements.statusBar) {
+      this.elements.statusBar.textContent = message;
+      this.elements.statusBar.setAttribute('aria-label', message);
+    }
   };
 
   updateExtractionStatus = (timestamp) => {
+    if (!this.elements.extractionStatus) return;
+
     if (!this.state.lastExtraction) {
       this.elements.extractionStatus.textContent = '';
       return;
@@ -548,15 +562,23 @@ class PopupController {
 
   analyzeLLMFree = async () => {
     // Show loading state
-    this.elements.analyzeAiBtn.disabled = true;
-    this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+    if (this.elements.analyzeAiBtn) {
+      this.elements.analyzeAiBtn.disabled = true;
+      this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+    }
 
+    const startTime = performance.now();
     const bookmarkCount = this.state.lastExtraction.length;
     this.updateStatus(`Analyzing ${bookmarkCount} bookmarks (LLM-free mode)...`);
 
     try {
       const provider = new LLMFreeProvider(this.constants);
       const analysis = await provider.analyzeBookmarks(this.state.lastExtraction);
+
+      // Store performance metrics
+      const duration = Math.round(performance.now() - startTime);
+      this.state.performanceMetrics.lastAnalysisTime = duration;
+      await chrome.storage.local.set({ performanceMetrics: this.state.performanceMetrics });
 
       this.state.aiAnalysis = analysis;
       await chrome.storage.local.set({ aiAnalysis: analysis });
@@ -568,8 +590,10 @@ class PopupController {
       this.updateStatus(`Analysis failed: ${error.message}`);
     } finally {
       // Reset button state
-      this.elements.analyzeAiBtn.disabled = false;
-      this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+      if (this.elements.analyzeAiBtn) {
+        this.elements.analyzeAiBtn.disabled = false;
+        this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+      }
     }
   };
 
@@ -1300,13 +1324,17 @@ class PopupController {
     const analysisTime = metrics.lastAnalysisTime ? `${metrics.lastAnalysisTime}ms` : 'N/A';
     const bookmarksCount = metrics.bookmarksExtracted || this.state.lastExtraction?.length || 0;
 
+    const providerDisplay = this.state.llmProvider === 'none'
+      ? 'LLM-Free Mode'
+      : (this.state.llmProvider || 'None').toUpperCase();
+
     dialogContent.innerHTML = `
       <h2 style="margin-top: 0; color: var(--text-color);">Performance Metrics</h2>
       <div style="color: var(--text-color); margin-bottom: 16px;">
         <p><strong>Last Extraction Time:</strong> ${extractionTime}</p>
         <p><strong>Last Analysis Time:</strong> ${analysisTime}</p>
         <p><strong>Bookmarks Extracted:</strong> ${bookmarksCount}</p>
-        <p><strong>Current Provider:</strong> ${this.state.llmProvider === 'none' ? 'LLM-Free Mode' : this.state.llmProvider.toUpperCase()}</p>
+        <p><strong>Current Provider:</strong> ${providerDisplay}</p>
       </div>
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button id="closeMetricsBtn" style="padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;">Close</button>
