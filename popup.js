@@ -27,7 +27,19 @@ class PopupController {
     this.constants = {
       BATCH_SIZE: 100,
       SCROLL_DELAY: 1000,
-      MAX_SAFE_BOOKMARKS: 500
+      MAX_SAFE_BOOKMARKS: 500,
+      AI_ANALYSIS_LIMIT: 50,
+      AI_MAX_TOKENS: 500,
+      AI_TEMPERATURE: 0.7,
+      AI_MODEL: 'gpt-3.5-turbo',
+      AUTO_SCROLL_DELAY: 2000,
+      AUTO_SCROLL_MAX_ATTEMPTS: 50,
+      AUTO_SCROLL_STABLE_ATTEMPTS: 3,
+      POST_SCROLL_DELAY: 1000,
+      POST_SCAN_DELAY: 1000,
+      API_KEY_MIN_LENGTH: 20,
+      MAX_TAGS: 20,
+      MAX_CATEGORIES: 10
     };
   };
 
@@ -70,6 +82,30 @@ class PopupController {
         darkMode: this.state.isDarkMode
       }
     });
+  };
+
+  validateApiKey = (apiKey) => {
+    if (!apiKey || typeof apiKey !== 'string') {
+      return { valid: false, error: 'API key is required' };
+    }
+
+    const trimmedKey = apiKey.trim();
+
+    // Empty check
+    if (trimmedKey.length === 0) {
+      return { valid: false, error: 'API key cannot be empty' };
+    }
+
+    // OpenAI API keys start with 'sk-' and are typically 40+ characters
+    if (!trimmedKey.startsWith('sk-')) {
+      return { valid: false, error: 'Invalid API key format. OpenAI keys start with "sk-"' };
+    }
+
+    if (trimmedKey.length < this.constants.API_KEY_MIN_LENGTH) {
+      return { valid: false, error: 'API key is too short. Please check your key.' };
+    }
+
+    return { valid: true, error: null };
   };
 
   saveApiKey = async (apiKey) => {
@@ -139,10 +175,17 @@ class PopupController {
   updateProgressBar = () => {
     const { current, total } = this.state.progress;
     if (total > 0) {
-      const percent = (current / total) * 100;
+      const percent = Math.round((current / total) * 100);
       this.elements.progressFill.style.width = `${percent}%`;
       this.elements.progressText.textContent = `${current} / ${total} bookmarks`;
       this.elements.progressBar.style.display = 'block';
+
+      // Update ARIA attributes for accessibility
+      const progressBarEl = document.getElementById('progress-bar');
+      if (progressBarEl) {
+        progressBarEl.setAttribute('aria-valuenow', percent);
+        progressBarEl.setAttribute('aria-valuetext', `${current} of ${total} bookmarks processed`);
+      }
     } else {
       this.elements.progressBar.style.display = 'none';
     }
@@ -176,12 +219,95 @@ class PopupController {
     await this.saveSettings();
   };
 
+  showConfirmDialog = (message, onConfirm) => {
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color);
+      padding: 24px;
+      border-radius: 8px;
+      max-width: 400px;
+      width: 90%;
+    `;
+
+    const messageEl = document.createElement('p');
+    messageEl.style.cssText = 'color: var(--text-color); margin: 0 0 16px 0; font-size: 15px;';
+    messageEl.textContent = message;
+    dialogContent.appendChild(messageEl);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    cancelBtn.addEventListener('click', () => {
+      document.body.removeChild(dialog);
+    });
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.style.cssText = 'padding: 8px 16px; border: none; background: var(--danger-color); color: white; border-radius: 4px; cursor: pointer;';
+    confirmBtn.addEventListener('click', () => {
+      document.body.removeChild(dialog);
+      onConfirm();
+    });
+
+    buttonContainer.appendChild(cancelBtn);
+    buttonContainer.appendChild(confirmBtn);
+    dialogContent.appendChild(buttonContainer);
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    // ESC key to close
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        document.body.removeChild(dialog);
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // Close on background click
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        document.body.removeChild(dialog);
+        document.removeEventListener('keydown', escHandler);
+      }
+    });
+  };
+
   handleClearStorage = async () => {
-    this.state.lastExtraction = null;
-    this.state.aiAnalysis = null;
-    await chrome.storage.local.remove(['lastExtraction', 'aiAnalysis']);
-    this.updateStatus('Stored bookmarks and analysis cleared');
-    this.updateUI();
+    this.showConfirmDialog(
+      'Are you sure you want to clear all stored bookmarks and AI analysis? This cannot be undone.',
+      async () => {
+        this.state.lastExtraction = null;
+        this.state.aiAnalysis = null;
+        await chrome.storage.local.remove(['lastExtraction', 'aiAnalysis']);
+
+        // Remove AI results display if present
+        const existingResults = document.getElementById('ai-results');
+        if (existingResults) {
+          existingResults.remove();
+        }
+
+        this.updateStatus('Stored bookmarks and analysis cleared');
+        this.updateUI();
+      }
+    );
   };
 
   handleProgressUpdate = (progress) => {
@@ -233,23 +359,28 @@ class PopupController {
   handleAutoScroll = () => {
     this.updateStatus('Auto-scrolling and scanning...');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
+      const tabId = tabs[0].id;
+
       // First, inject auto-scroll script
       chrome.scripting.executeScript({
-        target: { tabId: tabs[0].id },
+        target: { tabId: tabId },
         func: async () => {
           const scrollAndWait = async () => {
             let lastHeight = 0;
             let scrollAttempts = 0;
-            const maxAttempts = 50;
+            const maxAttempts = 50; // Note: Using local constant as this runs in injected context
+            const scrollDelay = 2000;
+            const stableAttempts = 3;
+            const postScrollDelay = 1000;
 
             while (scrollAttempts < maxAttempts) {
               window.scrollTo(0, document.body.scrollHeight);
-              await new Promise(r => setTimeout(r, 2000));
+              await new Promise(r => setTimeout(r, scrollDelay));
 
               const newHeight = document.body.scrollHeight;
               if (newHeight === lastHeight) {
                 scrollAttempts++;
-                if (scrollAttempts >= 3) break;
+                if (scrollAttempts >= stableAttempts) break;
               } else {
                 scrollAttempts = 0;
               }
@@ -257,16 +388,24 @@ class PopupController {
             }
 
             window.scrollTo(0, 0);
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, postScrollDelay));
           };
 
           await scrollAndWait();
+          return { success: true };
         }
-      }, () => {
-        // After scrolling, scan
+      }, (results) => {
+        // Check for errors
+        if (chrome.runtime.lastError) {
+          this.updateStatus('Error during auto-scroll. Please refresh and try again.');
+          return;
+        }
+
+        // After scrolling completes successfully, scan
+        this.updateStatus('Auto-scroll complete. Scanning bookmarks...');
         setTimeout(() => {
           this.handleScan();
-        }, 2000);
+        }, this.constants.POST_SCAN_DELAY);
       });
     });
   };
@@ -282,21 +421,49 @@ class PopupController {
       return;
     }
 
-    this.updateStatus('Analyzing bookmarks with AI...');
+    // Show loading state
+    this.elements.analyzeAiBtn.disabled = true;
+    this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+
+    const bookmarkCount = this.state.lastExtraction.length;
+    const analyzeCount = Math.min(bookmarkCount, this.constants.AI_ANALYSIS_LIMIT);
+
+    if (bookmarkCount > this.constants.AI_ANALYSIS_LIMIT) {
+      this.updateStatus(`Analyzing first ${analyzeCount} of ${bookmarkCount} bookmarks with AI...`);
+    } else {
+      this.updateStatus(`Analyzing ${analyzeCount} bookmarks with AI...`);
+    }
 
     try {
-      const aiService = new AIAnalysisService(this.state.apiKey);
+      const aiService = new AIAnalysisService(this.state.apiKey, this.constants);
       const analysis = await aiService.analyzeBookmarks(this.state.lastExtraction);
 
       this.state.aiAnalysis = analysis;
       await chrome.storage.local.set({ aiAnalysis: analysis });
 
-      this.updateStatus(`Analysis complete! Found ${analysis.tags.length} tags and ${analysis.categories.length} categories.`);
+      let statusMsg = `Analysis complete! Found ${analysis.tags.length} tags and ${analysis.categories.length} categories.`;
+      if (bookmarkCount > this.constants.AI_ANALYSIS_LIMIT) {
+        statusMsg += ` (Analyzed first ${this.constants.AI_ANALYSIS_LIMIT} of ${bookmarkCount} bookmarks)`;
+      }
+
+      this.updateStatus(statusMsg);
       this.showAnalysisResults(analysis);
     } catch (error) {
       console.error('AI Analysis error:', error);
       this.updateStatus(`Analysis failed: ${error.message}`);
+    } finally {
+      // Reset button state
+      this.elements.analyzeAiBtn.disabled = false;
+      this.elements.analyzeAiBtn.textContent = 'Analyze with AI';
     }
+  };
+
+  // Sanitize text to prevent XSS attacks
+  sanitizeText = (text) => {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   };
 
   showAnalysisResults = (analysis) => {
@@ -306,6 +473,7 @@ class PopupController {
       existingResults.remove();
     }
 
+    // Create container using DOM methods instead of innerHTML
     const resultsDiv = document.createElement('div');
     resultsDiv.id = 'ai-results';
     resultsDiv.style.cssText = `
@@ -316,56 +484,99 @@ class PopupController {
       border-radius: 8px;
     `;
 
-    let html = '<h3 style="margin-top: 0; color: var(--text-color);">AI Analysis Results</h3>';
+    // Title
+    const title = document.createElement('h3');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'AI Analysis Results';
+    resultsDiv.appendChild(title);
 
     // Overall summary
     if (analysis.overallSummary) {
-      html += `<div style="margin-bottom: 16px;">
-        <strong style="color: var(--text-color);">Overall Summary:</strong>
-        <p style="color: var(--text-color); margin: 8px 0;">${analysis.overallSummary}</p>
-      </div>`;
+      const summaryDiv = document.createElement('div');
+      summaryDiv.style.cssText = 'margin-bottom: 16px;';
+
+      const summaryLabel = document.createElement('strong');
+      summaryLabel.style.color = 'var(--text-color)';
+      summaryLabel.textContent = 'Overall Summary:';
+      summaryDiv.appendChild(summaryLabel);
+
+      const summaryText = document.createElement('p');
+      summaryText.style.cssText = 'color: var(--text-color); margin: 8px 0;';
+      summaryText.textContent = analysis.overallSummary; // textContent auto-escapes
+      summaryDiv.appendChild(summaryText);
+
+      resultsDiv.appendChild(summaryDiv);
     }
 
     // Tags
     if (analysis.tags && analysis.tags.length > 0) {
-      html += `<div style="margin-bottom: 16px;">
-        <strong style="color: var(--text-color);">Tags:</strong><br>
-        <div style="margin-top: 8px;">
-          ${analysis.tags.map(tag => `<span style="display: inline-block; background: var(--primary-color); color: white; padding: 4px 12px; margin: 4px; border-radius: 16px; font-size: 12px;">${tag}</span>`).join('')}
-        </div>
-      </div>`;
+      const tagsDiv = document.createElement('div');
+      tagsDiv.style.cssText = 'margin-bottom: 16px;';
+
+      const tagsLabel = document.createElement('strong');
+      tagsLabel.style.color = 'var(--text-color)';
+      tagsLabel.textContent = 'Tags:';
+      tagsDiv.appendChild(tagsLabel);
+
+      tagsDiv.appendChild(document.createElement('br'));
+
+      const tagsContainer = document.createElement('div');
+      tagsContainer.style.cssText = 'margin-top: 8px;';
+
+      analysis.tags.forEach(tag => {
+        const tagSpan = document.createElement('span');
+        tagSpan.style.cssText = 'display: inline-block; background: var(--primary-color); color: white; padding: 4px 12px; margin: 4px; border-radius: 16px; font-size: 12px;';
+        tagSpan.textContent = tag; // textContent auto-escapes
+        tagsContainer.appendChild(tagSpan);
+      });
+
+      tagsDiv.appendChild(tagsContainer);
+      resultsDiv.appendChild(tagsDiv);
     }
 
     // Categories
     if (analysis.categories && analysis.categories.length > 0) {
-      html += `<div style="margin-bottom: 16px;">
-        <strong style="color: var(--text-color);">Categories:</strong>
-        <ul style="color: var(--text-color); margin: 8px 0; padding-left: 20px;">
-          ${analysis.categories.map(cat => `<li>${cat}</li>`).join('')}
-        </ul>
-      </div>`;
+      const categoriesDiv = document.createElement('div');
+      categoriesDiv.style.cssText = 'margin-bottom: 16px;';
+
+      const categoriesLabel = document.createElement('strong');
+      categoriesLabel.style.color = 'var(--text-color)';
+      categoriesLabel.textContent = 'Categories:';
+      categoriesDiv.appendChild(categoriesLabel);
+
+      const categoriesList = document.createElement('ul');
+      categoriesList.style.cssText = 'color: var(--text-color); margin: 8px 0; padding-left: 20px;';
+
+      analysis.categories.forEach(cat => {
+        const li = document.createElement('li');
+        li.textContent = cat; // textContent auto-escapes
+        categoriesList.appendChild(li);
+      });
+
+      categoriesDiv.appendChild(categoriesList);
+      resultsDiv.appendChild(categoriesDiv);
     }
 
     // Analyze more button
-    html += `<button id="analyzeBtn" style="background: var(--primary-color); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 8px;">Re-analyze</button>`;
-
-    resultsDiv.innerHTML = html;
+    const analyzeBtn = document.createElement('button');
+    analyzeBtn.id = 'analyzeBtn';
+    analyzeBtn.style.cssText = 'background: var(--primary-color); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 8px;';
+    analyzeBtn.textContent = 'Re-analyze';
+    analyzeBtn.addEventListener('click', () => this.analyzeBookmarks());
+    resultsDiv.appendChild(analyzeBtn);
 
     // Insert after status container
     const statusContainer = document.querySelector('.status-container');
     if (statusContainer && statusContainer.parentNode) {
       statusContainer.parentNode.insertBefore(resultsDiv, statusContainer.nextSibling);
     }
-
-    // Bind analyze button
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    if (analyzeBtn) {
-      analyzeBtn.addEventListener('click', () => this.analyzeBookmarks());
-    }
   };
 
   showSettingsDialog = () => {
     const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'settings-dialog-title');
     dialog.style.cssText = `
       position: fixed;
       top: 0;
@@ -389,7 +600,7 @@ class PopupController {
     `;
 
     dialogContent.innerHTML = `
-      <h2 style="margin-top: 0; color: var(--text-color);">Settings</h2>
+      <h2 id="settings-dialog-title" style="margin-top: 0; color: var(--text-color);">Settings</h2>
       <div style="margin-bottom: 16px;">
         <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
           AI API Key (OpenAI):
@@ -407,22 +618,99 @@ class PopupController {
     dialog.appendChild(dialogContent);
     document.body.appendChild(dialog);
 
-    // Event handlers
-    document.getElementById('cancelBtn').addEventListener('click', () => {
+    // Store currently focused element to restore later
+    const previouslyFocused = document.activeElement;
+
+    // Get all focusable elements in dialog
+    const getFocusableElements = () => {
+      return dialogContent.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+    };
+
+    // Focus first element
+    const focusableElements = getFocusableElements();
+    if (focusableElements.length > 0) {
+      focusableElements[0].focus();
+    }
+
+    // Focus trap
+    const handleTabKey = (e) => {
+      const focusables = Array.from(getFocusableElements());
+      const firstFocusable = focusables[0];
+      const lastFocusable = focusables[focusables.length - 1];
+
+      if (e.key === 'Tab') {
+        if (e.shiftKey) {
+          if (document.activeElement === firstFocusable) {
+            e.preventDefault();
+            lastFocusable.focus();
+          }
+        } else {
+          if (document.activeElement === lastFocusable) {
+            e.preventDefault();
+            firstFocusable.focus();
+          }
+        }
+      }
+    };
+
+    const closeDialog = () => {
       document.body.removeChild(dialog);
-    });
+      document.removeEventListener('keydown', handleDialogKeys);
+      if (previouslyFocused) {
+        previouslyFocused.focus();
+      }
+    };
+
+    // ESC key and tab trap
+    const handleDialogKeys = (e) => {
+      if (e.key === 'Escape') {
+        closeDialog();
+      } else {
+        handleTabKey(e);
+      }
+    };
+
+    document.addEventListener('keydown', handleDialogKeys);
+
+    // Event handlers
+    document.getElementById('cancelBtn').addEventListener('click', closeDialog);
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
       const apiKey = document.getElementById('apiKeyInput').value.trim();
+
+      // Validate API key before saving (allow empty to clear)
+      if (apiKey.length > 0) {
+        const validation = this.validateApiKey(apiKey);
+        if (!validation.valid) {
+          // Show error in dialog
+          const existingError = document.getElementById('apiKeyError');
+          if (existingError) {
+            existingError.textContent = validation.error;
+          } else {
+            const errorDiv = document.createElement('div');
+            errorDiv.id = 'apiKeyError';
+            errorDiv.style.cssText = 'color: var(--danger-color); font-size: 13px; margin-top: 8px;';
+            errorDiv.textContent = validation.error;
+            const inputParent = document.getElementById('apiKeyInput').parentElement;
+            inputParent.appendChild(errorDiv);
+          }
+          // Keep focus on input
+          document.getElementById('apiKeyInput').focus();
+          return;
+        }
+      }
+
       await this.saveApiKey(apiKey);
-      this.updateStatus('Settings saved!');
-      document.body.removeChild(dialog);
+      this.updateStatus(apiKey.length > 0 ? 'Settings saved!' : 'API key cleared');
+      closeDialog();
     });
 
     // Close on background click
     dialog.addEventListener('click', (e) => {
       if (e.target === dialog) {
-        document.body.removeChild(dialog);
+        closeDialog();
       }
     });
   };
@@ -605,16 +893,24 @@ class PopupController {
 
 // AI Analysis Service
 class AIAnalysisService {
-  constructor(apiKey) {
+  constructor(apiKey, constants) {
     this.apiKey = apiKey;
     this.apiUrl = 'https://api.openai.com/v1/chat/completions';
+    this.constants = constants || {
+      AI_ANALYSIS_LIMIT: 50,
+      AI_MAX_TOKENS: 500,
+      AI_TEMPERATURE: 0.7,
+      AI_MODEL: 'gpt-3.5-turbo',
+      MAX_TAGS: 20,
+      MAX_CATEGORIES: 10
+    };
   }
 
   async analyzeBookmarks(bookmarks) {
     // Prepare bookmark data for analysis
     const bookmarkTexts = bookmarks
       .filter(b => b.text && b.text.trim())
-      .slice(0, 50) // Limit to first 50 for cost efficiency
+      .slice(0, this.constants.AI_ANALYSIS_LIMIT)
       .map(b => `@${b.username}: ${b.text}`)
       .join('\n\n');
 
@@ -645,7 +941,7 @@ Respond in JSON format:
           'Authorization': `Bearer ${this.apiKey}`
         },
         body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
+          model: this.constants.AI_MODEL,
           messages: [
             {
               role: 'system',
@@ -656,8 +952,8 @@ Respond in JSON format:
               content: prompt
             }
           ],
-          temperature: 0.7,
-          max_tokens: 500
+          temperature: this.constants.AI_TEMPERATURE,
+          max_tokens: this.constants.AI_MAX_TOKENS
         })
       });
 
@@ -667,21 +963,69 @@ Respond in JSON format:
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
 
-      // Parse JSON response
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('Failed to parse AI response');
+      // Validate response structure
+      if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+        throw new Error('Invalid API response structure');
       }
 
-      const analysis = JSON.parse(jsonMatch[0]);
-      return {
-        overallSummary: analysis.overallSummary || '',
-        tags: analysis.tags || [],
-        categories: analysis.categories || [],
+      if (!data.choices[0].message || !data.choices[0].message.content) {
+        throw new Error('Missing content in API response');
+      }
+
+      const content = data.choices[0].message.content;
+
+      // Parse JSON response - try multiple strategies
+      let analysis = null;
+
+      // Strategy 1: Try parsing entire content as JSON
+      try {
+        analysis = JSON.parse(content);
+      } catch (e) {
+        // Strategy 2: Extract JSON from markdown code blocks
+        const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+        if (codeBlockMatch) {
+          try {
+            analysis = JSON.parse(codeBlockMatch[1]);
+          } catch (e2) {
+            // Continue to next strategy
+          }
+        }
+
+        // Strategy 3: Find first JSON object in content
+        if (!analysis) {
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              analysis = JSON.parse(jsonMatch[0]);
+            } catch (e3) {
+              throw new Error('Failed to parse AI response as JSON');
+            }
+          } else {
+            throw new Error('No JSON found in AI response');
+          }
+        }
+      }
+
+      // Validate analysis structure
+      if (!analysis || typeof analysis !== 'object') {
+        throw new Error('Analysis is not a valid object');
+      }
+
+      // Ensure required fields with safe defaults
+      const validatedAnalysis = {
+        overallSummary: typeof analysis.overallSummary === 'string' ? analysis.overallSummary : '',
+        tags: Array.isArray(analysis.tags) ? analysis.tags.filter(t => typeof t === 'string').slice(0, this.constants.MAX_TAGS) : [],
+        categories: Array.isArray(analysis.categories) ? analysis.categories.filter(c => typeof c === 'string').slice(0, this.constants.MAX_CATEGORIES) : [],
         timestamp: Date.now()
       };
+
+      // Validate we got at least something useful
+      if (!validatedAnalysis.overallSummary && validatedAnalysis.tags.length === 0 && validatedAnalysis.categories.length === 0) {
+        throw new Error('AI response contained no useful analysis data');
+      }
+
+      return validatedAnalysis;
     } catch (error) {
       console.error('AI Analysis error:', error);
       throw error;
