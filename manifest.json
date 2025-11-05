@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "X Bookmarks Analyzer",
-  "version": "0.6.0",
-  "description": "Extract and analyze your X (Twitter) bookmarks with AI-powered summaries, tags, and categories. Export as Markdown or CSV.",
+  "version": "0.7.0",
+  "description": "Extract and analyze your X (Twitter) bookmarks with multiple LLM providers (OpenAI, Anthropic) or LLM-free mode. Export as Markdown or CSV.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

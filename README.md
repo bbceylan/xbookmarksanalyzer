@@ -1,10 +1,41 @@
 # X Bookmarks Analyzer - Browser Extension
 
-![Version](https://img.shields.io/badge/version-0.6.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
+![Version](https://img.shields.io/badge/version-0.7.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
 
-Extract and analyze your X (Twitter) bookmarks with AI-powered insights. Get summaries, tags, and categories to understand your bookmarked content better. Export as Markdown or CSV with AI analysis included.
+Extract and analyze your X (Twitter) bookmarks with multiple LLM providers or completely LLM-free. Choose from OpenAI, Anthropic (Claude), or use built-in analysis without any external API. Enhanced markdown export with statistics and better formatting.
 
 ## 📋 Changelog
+
+### Version 0.7.0 (Beta) - Current - November 2025
+#### New Features
+- **🌐 LLM Agnostic Architecture**: Choose your preferred LLM provider
+  - OpenAI (GPT-3.5-turbo, GPT-4)
+  - Anthropic (Claude 3.5 Sonnet)
+  - LLM-Free Mode (no external API required)
+- **📊 LLM-Free Mode**: Complete analysis without external APIs
+  - Keyword extraction and frequency analysis
+  - Automatic category detection based on content
+  - Basic statistics and summaries
+  - No API costs, completely private
+- **📝 Enhanced Markdown Export**: Improved formatting and statistics
+  - Automatic statistics generation (engagement, top authors, date ranges)
+  - Better readable format with individual bookmark sections
+  - Works with or without AI analysis
+- **⚙️ Unified Settings**: Single settings dialog for all providers
+  - Provider selection dropdown
+  - Provider-specific API key validation
+  - Dynamic help text based on selected provider
+- **🔄 Auto-Analysis**: Automatic analysis after scanning with any provider
+  - Works with OpenAI, Anthropic, or LLM-free mode
+  - Instant results with LLM-free mode
+  - Optional - can be triggered manually
+
+#### Improvements
+- Provider abstraction layer for easy addition of new LLMs
+- Better error messages and provider-specific validation
+- Enhanced export includes statistics regardless of analysis type
+- More privacy options with LLM-free mode
+- Improved code organization with provider classes
 
 ### Version 0.6.0 (Beta) - November 2025
 #### New Features
@@ -50,21 +81,29 @@ Extract and analyze your X (Twitter) bookmarks with AI-powered insights. Get sum
 - **Go to Bookmarks Page**: Quickly open your X/Twitter bookmarks page.
 - **Scan Bookmarks**: Extract all tweet URLs from your X Bookmarks page with one click.
 - **Auto-Scroll & Scan All**: Automatically scrolls your bookmarks page to load and extract all bookmarks, even for large accounts.
-- **AI-Powered Analysis**: Analyze your bookmarks with OpenAI to discover themes, tags, and categories.
-  - **Overall Summary**: Get a 2-3 sentence summary of main themes in your bookmarks
+- **🌐 Multiple Analysis Options**: Choose how you want to analyze your bookmarks
+  - **OpenAI (GPT-3.5-turbo)**: Fast, cost-effective AI analysis
+  - **Anthropic (Claude)**: Advanced reasoning with Claude 3.5 Sonnet
+  - **LLM-Free Mode**: Built-in analysis without any external API
+- **📊 Comprehensive Analysis**: Discover themes, tags, and categories
+  - **Overall Summary**: Get a summary of main themes in your bookmarks
   - **Smart Tags**: Automatically generate 5-10 relevant keywords/tags
   - **Categories**: Identify 3-5 main categories your bookmarks fall into
-  - **Automatic Analysis**: AI analysis runs automatically after scanning (if API key is configured)
-  - **Manual Control**: Trigger analysis on-demand with the "Analyze with AI" button
-- **Enhanced Exports**: Export your bookmarks with AI insights included
-  - **Download as Markdown**: Export bookmarks with AI analysis at the top
+  - **Automatic Analysis**: Analysis runs automatically after scanning
+  - **Manual Control**: Trigger analysis on-demand with the "Analyze Bookmarks" button
+- **📝 Enhanced Exports**: Export your bookmarks with statistics and insights
+  - **Download as Markdown**: Beautifully formatted export with statistics, analysis, and individual bookmark sections
   - **Download as CSV**: Spreadsheet format with tags and categories columns
-  - **Copy to Clipboard**: Copy formatted Markdown including AI insights
-- **Settings Management**: Configure your OpenAI API key through a user-friendly settings dialog
+  - **Copy to Clipboard**: Copy formatted Markdown including all insights
+  - **Always Available**: Export works with or without analysis
+- **⚙️ Settings Management**: Configure analysis provider and API keys
+  - Provider selection (OpenAI, Anthropic, or None)
+  - Provider-specific API key validation
+  - Dynamic help text and links
 - **Status Bar Feedback**: All actions provide clear, accessible feedback at the top of the popup—no intrusive popups.
 - **Accessibility First**: Full keyboard navigation, ARIA labels, visible focus outlines, and screen reader support.
 - **Large Bookmark Set Warning**: If you have more than 500 bookmarks, you'll be warned to consider exporting in batches.
-- **Privacy Conscious**: Bookmark extraction happens locally. AI analysis is optional and requires your own OpenAI API key.
+- **Privacy Conscious**: Bookmark extraction happens locally. LLM-free mode requires no external services. External LLM providers are optional and use your own API keys.
 
 ### Coming Soon
 
@@ -142,10 +181,13 @@ Extract and analyze your X (Twitter) bookmarks with AI-powered insights. Get sum
 
 ## 📖 How to Use
 
-1. **Configure AI (Optional)**
+1. **Configure Analysis Provider**
    - Click the settings icon (⚙️) in the bottom right
-   - Enter your OpenAI API key
-   - Get your key from [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Choose your preferred analysis provider:
+     - **None (LLM-free mode)**: Uses built-in analysis, no API key needed, completely free and private
+     - **OpenAI**: Get your key from [OpenAI Platform](https://platform.openai.com/api-keys)
+     - **Anthropic**: Get your key from [Anthropic Console](https://console.anthropic.com/settings/keys)
+   - Enter your API key if using OpenAI or Anthropic
    - Click "Save"
 
 2. **Go to Bookmarks Page**
@@ -157,15 +199,17 @@ Extract and analyze your X (Twitter) bookmarks with AI-powered insights. Get sum
    - Click "Scan Bookmarks" to extract all currently loaded bookmarks
    - Or click "Auto-Scroll & Scan All" for automatic scrolling and complete extraction
 
-4. **Analyze with AI (Optional)**
-   - If you configured an API key, analysis runs automatically after scanning
-   - Or click "Analyze with AI" button to manually trigger analysis
+4. **Analyze Bookmarks**
+   - Analysis runs automatically after scanning
+   - Or click "Analyze Bookmarks" button to manually trigger analysis
    - View the generated summary, tags, and categories in the results panel
+   - LLM-free mode is instant, external providers may take a few seconds
 
 5. **Export or Copy**
-   - Click "Download .md" to save as a Markdown file (includes AI analysis)
+   - Click "Download .md" to save as a Markdown file (includes statistics and analysis)
    - Click "Download .csv" to save as a CSV file (includes tags and categories)
-   - Or click "Copy to Clipboard" to copy the formatted Markdown with AI insights
+   - Or click "Copy to Clipboard" to copy the formatted Markdown
+   - Export works immediately after scanning, even without analysis
 
 ## 🛠️ Development
 
@@ -400,19 +444,36 @@ x-bookmarks-extractor-extension/
 ## 🔒 Privacy & Security
 
 - **Local Processing**: All bookmark extraction happens in your browser
-- **Optional AI**: AI analysis is completely optional and requires your own API key
-- **Your API Key**: OpenAI API key is stored locally in your browser only
+- **LLM-Free Option**: Complete analysis without any external API calls
+- **Your Choice**: Choose between LLM-free mode or external providers
+- **Your API Keys**: API keys are stored locally in your browser only
 - **No Data Collection**: Extension doesn't collect or transmit your personal data
-- **Transparent**: AI analysis only happens when you explicitly enable it
-- **Control**: You can use the extension without AI features at all
+- **Transparent**: Analysis only happens when you explicitly enable it
+- **Full Control**: Use the extension completely offline with LLM-free mode
 - **Minimal Permissions**: Only `tabs`, `activeTab`, `clipboardWrite`, `scripting`, and `storage` are used
 
-### AI Features & Costs
-- AI analysis uses your own OpenAI API key
-- Analysis is limited to the first 50 bookmarks for cost efficiency
-- Uses GPT-3.5-turbo model (approximately $0.002 per analysis)
-- You control when and if AI analysis runs
-- All AI processing happens through OpenAI's API (see their [privacy policy](https://openai.com/policies/privacy-policy))
+### Analysis Options & Costs
+
+#### LLM-Free Mode (Default)
+- **Cost**: Completely free
+- **Privacy**: 100% local processing, no external API calls
+- **Features**: Keyword extraction, category detection, basic statistics
+- **Speed**: Instant results
+- **Requirements**: None
+
+#### OpenAI Provider
+- **Cost**: Uses your own OpenAI API key (~$0.002 per analysis with GPT-3.5-turbo)
+- **Privacy**: Data sent to OpenAI (see their [privacy policy](https://openai.com/policies/privacy-policy))
+- **Features**: Advanced AI summaries, intelligent tags and categories
+- **Limit**: First 50 bookmarks per analysis for cost efficiency
+- **Requirements**: OpenAI API key
+
+#### Anthropic Provider
+- **Cost**: Uses your own Anthropic API key (~$0.003 per analysis with Claude 3.5 Sonnet)
+- **Privacy**: Data sent to Anthropic (see their [privacy policy](https://www.anthropic.com/privacy))
+- **Features**: Advanced reasoning, nuanced summaries and categorization
+- **Limit**: First 50 bookmarks per analysis for cost efficiency
+- **Requirements**: Anthropic API key
 
 ## 🐛 Known Issues and Limitations
 
@@ -458,12 +519,17 @@ x-bookmarks-extractor-extension/
 - If you see no results, scroll down to load more bookmarks or use "Auto-Scroll & Scan All"
 - If you have more than 500 bookmarks, consider exporting in batches for best performance
 
-### AI Analysis Issues
-- **"No API key configured"**: Click the settings icon and add your OpenAI API key
-- **"Analysis failed: 401"**: Your API key is invalid or expired. Get a new key from OpenAI
+### Analysis Issues
+- **"No API key configured"**:
+  - If using LLM-free mode: No API key needed, analysis should work automatically
+  - If using OpenAI/Anthropic: Click the settings icon and add your API key
+- **"Analysis failed: 401"**: Your API key is invalid or expired. Get a new key from your provider
 - **"Analysis failed: 429"**: Rate limit exceeded. Wait a moment and try again
 - **"No bookmark content to analyze"**: Make sure your bookmarks contain text content
-- **Slow analysis**: Analysis processes up to 50 bookmarks and may take 5-10 seconds
+- **Slow analysis**:
+  - LLM-free mode: Should be instant
+  - External providers: May take 5-10 seconds for up to 50 bookmarks
+- **Want faster/free analysis**: Switch to LLM-free mode in settings (no API key required)
 
 ### Export Issues
 - If clipboard copy fails, the extension will select the text for you—just press `Ctrl+C` or `Cmd+C` to copy manually
@@ -479,7 +545,33 @@ x-bookmarks-extractor-extension/
 
 ## 📝 Version History
 
-### v0.6.0 (Beta) - Current
+### v0.7.0 (Beta) - Current
+#### Major Features
+- LLM-agnostic architecture supporting multiple providers
+- OpenAI provider (GPT-3.5-turbo)
+- Anthropic provider (Claude 3.5 Sonnet)
+- LLM-free mode with built-in analysis (no external API required)
+- Enhanced markdown export with statistics and better formatting
+- Unified settings dialog with provider selection
+- Provider-specific API key validation
+- Automatic analysis with any provider
+
+#### Improvements
+- Provider abstraction layer for easy extensibility
+- Enhanced export includes statistics regardless of analysis type
+- Better error messages and validation
+- Improved privacy options with LLM-free mode
+- More readable markdown format with individual bookmark sections
+
+#### Technical Changes
+- Refactored to provider-based architecture
+- Created base LLMProvider class
+- Implemented OpenAIProvider, AnthropicProvider, and LLMFreeProvider
+- Added calculateBasicStats for enhanced exports
+- Updated settings UI with dynamic provider selection
+- Improved code organization and maintainability
+
+### v0.6.0 (Beta)
 #### Major Features
 - AI-powered bookmark analysis with OpenAI integration
 - Automatic summary generation for bookmark collections
@@ -523,15 +615,15 @@ x-bookmarks-extractor-extension/
 - Performance recommendations
 - Accessibility guidelines
 
-### Planned for v0.7.0 (August 2025)
+### Planned for v0.8.0 (December 2025)
 - Persistent storage implementation
 - Basic search functionality
-- Progress bar integration
+- Progress bar enhancements
 - Initial dark mode support
-- Improved error messages
-- Basic performance metrics
+- Additional export formats (HTML, JSON)
+- Performance metrics dashboard
 
-### Planned for v0.9.0 (September 2025)
+### Planned for v0.9.0 (January 2026)
 - Advanced search capabilities
 - Complete dark mode implementation
 - Settings panel
