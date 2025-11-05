@@ -559,9 +559,34 @@ button:focus, input:focus, textarea:focus {
   opacity: 0.9;
 }
 
-/* Hide search UI until implemented */
+/* Search and filter group */
 .search-group {
-  display: none;
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-color);
+  color: var(--text-color);
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(29, 161, 242, 0.2);
+}
+
+.search-input::placeholder {
+  color: var(--disabled-color);
 }
 
 @media (max-width: 450px) {

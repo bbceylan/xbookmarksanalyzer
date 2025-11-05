@@ -14,14 +14,28 @@ class PopupController {
   initializeState = () => {
     this.state = {
       lastExtraction: null,
+      filteredBookmarks: null, // For search/filter results
       isDarkMode: false,
       aiAnalysis: null,
       apiKey: '',
       llmProvider: 'none', // 'openai', 'anthropic', 'none'
+      searchQuery: '',
+      filterOptions: {
+        minLikes: 0,
+        minRetweets: 0,
+        author: '',
+        dateFrom: '',
+        dateTo: ''
+      },
       progress: {
         current: 0,
         total: 0,
         status: 'Ready'
+      },
+      performanceMetrics: {
+        lastExtractionTime: 0,
+        lastAnalysisTime: 0,
+        bookmarksExtracted: 0
       }
     };
 
@@ -40,8 +54,13 @@ class PopupController {
       POST_SCAN_DELAY: 1000,
       API_KEY_MIN_LENGTH: 20,
       MAX_TAGS: 20,
-      MAX_CATEGORIES: 10
+      MAX_CATEGORIES: 10,
+      API_RETRY_ATTEMPTS: 3,
+      API_RETRY_DELAY: 1000
     };
+
+    // Debounced functions cache
+    this.debouncedSearch = this.debounce(this.performSearch.bind(this), 300);
   };
 
   bindElements = () => {
@@ -59,7 +78,11 @@ class PopupController {
       analyzeAiBtn: document.getElementById('analyzeAiBtn'),
       exportMdBtn: document.getElementById('exportMdBtn'),
       exportCsvBtn: document.getElementById('exportCsvBtn'),
+      exportJsonBtn: document.getElementById('exportJsonBtn'),
       copyClipboardBtn: document.getElementById('copyClipboardBtn'),
+      searchInput: document.getElementById('searchInput'),
+      filterBtn: document.getElementById('filterBtn'),
+      metricsBtn: document.getElementById('metricsBtn'),
       mainContent: document.getElementById('mainContent'),
       closeBtn: document.getElementById('closeBtn'),
       settingsBtn: document.getElementById('settingsBtn')
@@ -126,7 +149,7 @@ class PopupController {
   };
 
   loadLastExtraction = async () => {
-    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis']);
+    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis', 'performanceMetrics']);
     if (result.lastExtraction) {
       this.state.lastExtraction = result.lastExtraction.bookmarks;
       this.updateExtractionStatus(result.lastExtraction.timestamp);
@@ -135,39 +158,50 @@ class PopupController {
     if (result.aiAnalysis) {
       this.state.aiAnalysis = result.aiAnalysis;
     }
+    if (result.performanceMetrics) {
+      this.state.performanceMetrics = result.performanceMetrics;
+    }
   };
 
   setupEventListeners = () => {
     // Dark mode toggle
-    this.elements.darkModeToggle.addEventListener('change', e => this.handleDarkModeToggle(e));
+    this.elements.darkModeToggle?.addEventListener('change', e => this.handleDarkModeToggle(e));
 
     // Clear storage
-    this.elements.clearStorageBtn.addEventListener('click', () => this.handleClearStorage());
+    this.elements.clearStorageBtn?.addEventListener('click', () => this.handleClearStorage());
 
     // Scan buttons
-    this.elements.scanBtn.addEventListener('click', () => this.handleScan());
-    this.elements.autoScrollBtn.addEventListener('click', () => this.handleAutoScroll());
-    this.elements.bookmarksBtn.addEventListener('click', () => this.openBookmarksPage());
+    this.elements.scanBtn?.addEventListener('click', () => this.handleScan());
+    this.elements.autoScrollBtn?.addEventListener('click', () => this.handleAutoScroll());
+    this.elements.bookmarksBtn?.addEventListener('click', () => this.openBookmarksPage());
 
     // AI Analysis button
-    this.elements.analyzeAiBtn.addEventListener('click', () => this.analyzeBookmarks());
+    this.elements.analyzeAiBtn?.addEventListener('click', () => this.analyzeBookmarks());
 
     // Export buttons
-    this.elements.exportMdBtn.addEventListener('click', () => this.downloadMarkdown());
-    this.elements.exportCsvBtn.addEventListener('click', () => this.downloadCSV());
-    this.elements.copyClipboardBtn.addEventListener('click', () => this.copyToClipboard());
+    this.elements.exportMdBtn?.addEventListener('click', () => this.downloadMarkdown());
+    this.elements.exportCsvBtn?.addEventListener('click', () => this.downloadCSV());
+    this.elements.exportJsonBtn?.addEventListener('click', () => this.downloadJSON());
+    this.elements.copyClipboardBtn?.addEventListener('click', () => this.copyToClipboard());
+
+    // Search and filter
+    this.elements.searchInput?.addEventListener('input', (e) => {
+      this.state.searchQuery = e.target.value;
+      this.debouncedSearch();
+    });
+    this.elements.filterBtn?.addEventListener('click', () => this.showFilterDialog());
+    this.elements.metricsBtn?.addEventListener('click', () => this.showMetricsDialog());
 
     // Settings and close
-    this.elements.closeBtn.addEventListener('click', () => window.close());
-    this.elements.settingsBtn.addEventListener('click', () => this.showSettingsDialog());
+    this.elements.closeBtn?.addEventListener('click', () => window.close());
+    this.elements.settingsBtn?.addEventListener('click', () => this.showSettingsDialog());
 
     // Listen for messages from content script
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'progressUpdate') {
         this.handleProgressUpdate(msg.progress);
-      } else if (msg.type === 'scanComplete') {
-        this.handleScanComplete(msg.bookmarks);
       }
+      // Note: scanComplete is handled via sendResponse callback, not as a message
     });
   };
 
@@ -178,19 +212,26 @@ class PopupController {
 
   updateExportButtons = () => {
     const hasData = this.state.lastExtraction && this.state.lastExtraction.length > 0;
-    this.elements.exportMdBtn.disabled = !hasData;
-    this.elements.exportCsvBtn.disabled = !hasData;
-    this.elements.copyClipboardBtn.disabled = !hasData;
-    this.elements.analyzeAiBtn.disabled = !hasData;
+    if (this.elements.exportMdBtn) this.elements.exportMdBtn.disabled = !hasData;
+    if (this.elements.exportCsvBtn) this.elements.exportCsvBtn.disabled = !hasData;
+    if (this.elements.exportJsonBtn) this.elements.exportJsonBtn.disabled = !hasData;
+    if (this.elements.copyClipboardBtn) this.elements.copyClipboardBtn.disabled = !hasData;
+    if (this.elements.analyzeAiBtn) this.elements.analyzeAiBtn.disabled = !hasData;
   };
 
   updateProgressBar = () => {
     const { current, total } = this.state.progress;
     if (total > 0) {
       const percent = Math.round((current / total) * 100);
-      this.elements.progressFill.style.width = `${percent}%`;
-      this.elements.progressText.textContent = `${current} / ${total} bookmarks`;
-      this.elements.progressBar.style.display = 'block';
+      if (this.elements.progressFill) {
+        this.elements.progressFill.style.width = `${percent}%`;
+      }
+      if (this.elements.progressText) {
+        this.elements.progressText.textContent = `${current} / ${total} bookmarks`;
+      }
+      if (this.elements.progressBar) {
+        this.elements.progressBar.style.display = 'block';
+      }
 
       // Update ARIA attributes for accessibility
       const progressBarEl = document.getElementById('progress-bar');
@@ -199,7 +240,9 @@ class PopupController {
         progressBarEl.setAttribute('aria-valuetext', `${current} of ${total} bookmarks processed`);
       }
     } else {
-      this.elements.progressBar.style.display = 'none';
+      if (this.elements.progressBar) {
+        this.elements.progressBar.style.display = 'none';
+      }
     }
   };
 
@@ -208,11 +251,15 @@ class PopupController {
   };
 
   updateStatus = (message) => {
-    this.elements.statusBar.textContent = message;
-    this.elements.statusBar.setAttribute('aria-label', message);
+    if (this.elements.statusBar) {
+      this.elements.statusBar.textContent = message;
+      this.elements.statusBar.setAttribute('aria-label', message);
+    }
   };
 
   updateExtractionStatus = (timestamp) => {
+    if (!this.elements.extractionStatus) return;
+
     if (!this.state.lastExtraction) {
       this.elements.extractionStatus.textContent = '';
       return;
@@ -327,13 +374,21 @@ class PopupController {
     this.updateUI();
   };
 
-  handleScanComplete = async (bookmarks) => {
+  handleScanComplete = async (bookmarks, performanceData) => {
     this.state.lastExtraction = bookmarks;
+
+    // Store performance metrics
+    if (performanceData) {
+      this.state.performanceMetrics.lastExtractionTime = performanceData.duration || 0;
+      this.state.performanceMetrics.bookmarksExtracted = performanceData.tweetsExtracted || bookmarks.length;
+    }
+
     await chrome.storage.local.set({
       lastExtraction: {
         timestamp: Date.now(),
         bookmarks: bookmarks
-      }
+      },
+      performanceMetrics: this.state.performanceMetrics
     });
 
     this.updateStatus(`Successfully extracted ${bookmarks.length} bookmarks`);
@@ -366,7 +421,7 @@ class PopupController {
           return;
         }
         if (response && response.success) {
-          this.handleScanComplete(response.tweets || []);
+          this.handleScanComplete(response.tweets || [], response.performance);
         } else {
           this.updateStatus('Error: Failed to scan bookmarks.');
         }
@@ -447,9 +502,12 @@ class PopupController {
     }
 
     // Show loading state
-    this.elements.analyzeAiBtn.disabled = true;
-    this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+    if (this.elements.analyzeAiBtn) {
+      this.elements.analyzeAiBtn.disabled = true;
+      this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+    }
 
+    const startTime = performance.now();
     const bookmarkCount = this.state.lastExtraction.length;
     const analyzeCount = Math.min(bookmarkCount, this.constants.AI_ANALYSIS_LIMIT);
 
@@ -461,7 +519,12 @@ class PopupController {
 
     try {
       const provider = this.createLLMProvider();
-      const analysis = await provider.analyzeBookmarks(this.state.lastExtraction);
+      const analysis = await this.retryOperation(() => provider.analyzeBookmarks(this.state.lastExtraction));
+
+      // Store performance metrics
+      const duration = Math.round(performance.now() - startTime);
+      this.state.performanceMetrics.lastAnalysisTime = duration;
+      await chrome.storage.local.set({ performanceMetrics: this.state.performanceMetrics });
 
       this.state.aiAnalysis = analysis;
       await chrome.storage.local.set({ aiAnalysis: analysis });
@@ -478,8 +541,10 @@ class PopupController {
       this.updateStatus(`Analysis failed: ${error.message}`);
     } finally {
       // Reset button state
-      this.elements.analyzeAiBtn.disabled = false;
-      this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+      if (this.elements.analyzeAiBtn) {
+        this.elements.analyzeAiBtn.disabled = false;
+        this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+      }
     }
   };
 
@@ -497,15 +562,23 @@ class PopupController {
 
   analyzeLLMFree = async () => {
     // Show loading state
-    this.elements.analyzeAiBtn.disabled = true;
-    this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+    if (this.elements.analyzeAiBtn) {
+      this.elements.analyzeAiBtn.disabled = true;
+      this.elements.analyzeAiBtn.textContent = 'Analyzing...';
+    }
 
+    const startTime = performance.now();
     const bookmarkCount = this.state.lastExtraction.length;
     this.updateStatus(`Analyzing ${bookmarkCount} bookmarks (LLM-free mode)...`);
 
     try {
       const provider = new LLMFreeProvider(this.constants);
       const analysis = await provider.analyzeBookmarks(this.state.lastExtraction);
+
+      // Store performance metrics
+      const duration = Math.round(performance.now() - startTime);
+      this.state.performanceMetrics.lastAnalysisTime = duration;
+      await chrome.storage.local.set({ performanceMetrics: this.state.performanceMetrics });
 
       this.state.aiAnalysis = analysis;
       await chrome.storage.local.set({ aiAnalysis: analysis });
@@ -517,8 +590,10 @@ class PopupController {
       this.updateStatus(`Analysis failed: ${error.message}`);
     } finally {
       // Reset button state
-      this.elements.analyzeAiBtn.disabled = false;
-      this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+      if (this.elements.analyzeAiBtn) {
+        this.elements.analyzeAiBtn.disabled = false;
+        this.elements.analyzeAiBtn.textContent = 'Analyze Bookmarks';
+      }
     }
   };
 
@@ -847,68 +922,74 @@ class PopupController {
   };
 
   generateMarkdown = () => {
-    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) return '';
+    const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
+    if (!bookmarks || bookmarks.length === 0) return '';
 
-    const bookmarks = this.state.lastExtraction;
     const exportDate = new Date().toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     });
 
-    let md = `# X Bookmarks Export\n\n`;
-    md += `**Exported:** ${exportDate}\n`;
-    md += `**Total Bookmarks:** ${bookmarks.length}\n\n`;
+    // Use array for better performance
+    const mdParts = [
+      `# X Bookmarks Export\n\n`,
+      `**Exported:** ${exportDate}\n`,
+      `**Total Bookmarks:** ${bookmarks.length}\n\n`
+    ];
 
     // Add basic statistics
     const stats = this.calculateBasicStats(bookmarks);
-    md += `## Statistics\n\n`;
-    md += `- **Total Engagement:** ${stats.totalLikes + stats.totalRetweets} interactions\n`;
-    md += `- **Average Likes:** ${Math.round(stats.avgLikes)}\n`;
-    md += `- **Top Author:** @${stats.topAuthor.username || 'N/A'} (${stats.topAuthor.count} bookmarks)\n`;
-    md += `- **Date Range:** ${stats.dateRange}\n\n`;
+    mdParts.push(
+      `## Statistics\n\n`,
+      `- **Total Engagement:** ${stats.totalLikes + stats.totalRetweets} interactions\n`,
+      `- **Average Likes:** ${Math.round(stats.avgLikes)}\n`,
+      `- **Top Author:** @${stats.topAuthor.username || 'N/A'} (${stats.topAuthor.count} bookmarks)\n`,
+      `- **Date Range:** ${stats.dateRange}\n\n`
+    );
 
     // Add AI analysis if available
     if (this.state.aiAnalysis) {
-      md += `## Analysis\n\n`;
+      mdParts.push(`## Analysis\n\n`);
       if (this.state.aiAnalysis.overallSummary) {
-        md += `**Summary:** ${this.state.aiAnalysis.overallSummary}\n\n`;
+        mdParts.push(`**Summary:** ${this.state.aiAnalysis.overallSummary}\n\n`);
       }
       if (this.state.aiAnalysis.tags && this.state.aiAnalysis.tags.length > 0) {
-        md += `**Tags:** ${this.state.aiAnalysis.tags.join(', ')}\n\n`;
+        mdParts.push(`**Tags:** ${this.state.aiAnalysis.tags.join(', ')}\n\n`);
       }
       if (this.state.aiAnalysis.categories && this.state.aiAnalysis.categories.length > 0) {
-        md += `**Categories:**\n${this.state.aiAnalysis.categories.map(c => `- ${c}`).join('\n')}\n\n`;
+        mdParts.push(`**Categories:**\n${this.state.aiAnalysis.categories.map(c => `- ${c}`).join('\n')}\n\n`);
       }
-      md += `---\n\n`;
+      mdParts.push(`---\n\n`);
     }
 
-    md += `## Bookmarks\n\n`;
+    mdParts.push(`## Bookmarks\n\n`);
 
-    // Use a more readable format instead of a table
+    // Process bookmarks efficiently
     bookmarks.forEach((bookmark, index) => {
-      md += `### ${index + 1}. ${bookmark.displayName || 'Unknown'} (@${bookmark.username || 'unknown'})\n\n`;
+      mdParts.push(
+        `### ${index + 1}. ${bookmark.displayName || 'Unknown'} (@${bookmark.username || 'unknown'})\n\n`
+      );
 
       if (bookmark.text) {
-        md += `${bookmark.text}\n\n`;
+        mdParts.push(`${bookmark.text}\n\n`);
       }
 
-      md += `**Stats:** ${bookmark.likes || '0'} likes • ${bookmark.retweets || '0'} retweets • ${bookmark.replies || '0'} replies`;
+      const statsParts = [`**Stats:** ${bookmark.likes || '0'} likes • ${bookmark.retweets || '0'} retweets • ${bookmark.replies || '0'} replies`];
       if (bookmark.views) {
-        md += ` • ${bookmark.views} views`;
+        statsParts.push(` • ${bookmark.views} views`);
       }
-      md += `\n\n`;
+      mdParts.push(statsParts.join(''), `\n\n`);
 
       if (bookmark.dateTime) {
         const date = new Date(bookmark.dateTime);
-        md += `**Date:** ${date.toLocaleString()}\n\n`;
+        mdParts.push(`**Date:** ${date.toLocaleString()}\n\n`);
       }
 
-      md += `**Link:** ${bookmark.url}\n\n`;
-      md += `---\n\n`;
+      mdParts.push(`**Link:** ${bookmark.url}\n\n`, `---\n\n`);
     });
 
-    return md;
+    return mdParts.join('');
   };
 
   calculateBasicStats = (bookmarks) => {
@@ -959,7 +1040,8 @@ class PopupController {
   };
 
   generateCSV = () => {
-    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) return '';
+    const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
+    if (!bookmarks || bookmarks.length === 0) return '';
 
     const escapeCSV = (val) => {
       if (val === undefined || val === null) return '';
@@ -970,16 +1052,16 @@ class PopupController {
       return str;
     };
 
-    let csv = 'Author,Username,Date,Text,Likes,Retweets,Replies,Views,Link';
+    const rows = [];
 
-    // Add AI analysis columns if available
+    // Header row
     if (this.state.aiAnalysis) {
-      csv += ',Tags,Categories\n';
+      rows.push('Author,Username,Date,Text,Likes,Retweets,Replies,Views,Link,Tags,Categories');
       const tags = this.state.aiAnalysis.tags ? this.state.aiAnalysis.tags.join('; ') : '';
       const categories = this.state.aiAnalysis.categories ? this.state.aiAnalysis.categories.join('; ') : '';
 
-      this.state.lastExtraction.forEach(t => {
-        const row = [
+      bookmarks.forEach(t => {
+        rows.push([
           escapeCSV(t.displayName || ''),
           escapeCSV('@' + (t.username || '')),
           escapeCSV(t.dateTime || ''),
@@ -991,13 +1073,12 @@ class PopupController {
           escapeCSV(t.url),
           escapeCSV(tags),
           escapeCSV(categories)
-        ].join(',');
-        csv += row + '\n';
+        ].join(','));
       });
     } else {
-      csv += '\n';
-      this.state.lastExtraction.forEach(t => {
-        const row = [
+      rows.push('Author,Username,Date,Text,Likes,Retweets,Replies,Views,Link');
+      bookmarks.forEach(t => {
+        rows.push([
           escapeCSV(t.displayName || ''),
           escapeCSV('@' + (t.username || '')),
           escapeCSV(t.dateTime || ''),
@@ -1007,12 +1088,11 @@ class PopupController {
           escapeCSV(t.replies || ''),
           escapeCSV(t.views || ''),
           escapeCSV(t.url)
-        ].join(',');
-        csv += row + '\n';
+        ].join(','));
       });
     }
 
-    return csv;
+    return rows.join('\n');
   };
 
   downloadMarkdown = () => {
@@ -1089,6 +1169,233 @@ class PopupController {
         chrome.tabs.create({ url });
       }
     });
+  };
+
+  // Utility: Debounce function
+  debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  };
+
+  // Search functionality
+  performSearch = () => {
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      return;
+    }
+
+    const query = this.state.searchQuery.toLowerCase().trim();
+
+    if (!query) {
+      this.state.filteredBookmarks = null;
+      this.updateStatus(`Showing all ${this.state.lastExtraction.length} bookmarks`);
+      return;
+    }
+
+    this.state.filteredBookmarks = this.state.lastExtraction.filter(bookmark => {
+      return (
+        bookmark.text?.toLowerCase().includes(query) ||
+        bookmark.displayName?.toLowerCase().includes(query) ||
+        bookmark.username?.toLowerCase().includes(query)
+      );
+    });
+
+    this.updateStatus(`Found ${this.state.filteredBookmarks.length} bookmarks matching "${this.state.searchQuery}"`);
+  };
+
+  // Filter dialog
+  showFilterDialog = () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 400px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    dialogContent.innerHTML = `
+      <h2 style="margin-top: 0; color: var(--text-color);">Filter Bookmarks</h2>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          Min Likes:
+          <input type="number" id="minLikes" value="${this.state.filterOptions.minLikes}" min="0"
+                 style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+        </label>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          Min Retweets:
+          <input type="number" id="minRetweets" value="${this.state.filterOptions.minRetweets}" min="0"
+                 style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+        </label>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          Author Username:
+          <input type="text" id="authorFilter" value="${this.state.filterOptions.author}" placeholder="@username"
+                 style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+        </label>
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button id="resetBtn" style="padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;">Reset</button>
+        <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;">Cancel</button>
+        <button id="applyBtn" style="padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;">Apply</button>
+      </div>
+    `;
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    const closeDialog = () => document.body.removeChild(dialog);
+
+    document.getElementById('cancelBtn').addEventListener('click', closeDialog);
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      this.state.filterOptions = { minLikes: 0, minRetweets: 0, author: '', dateFrom: '', dateTo: '' };
+      this.state.filteredBookmarks = null;
+      this.updateStatus(`Showing all ${this.state.lastExtraction?.length || 0} bookmarks`);
+      closeDialog();
+    });
+
+    document.getElementById('applyBtn').addEventListener('click', () => {
+      this.state.filterOptions.minLikes = parseInt(document.getElementById('minLikes').value) || 0;
+      this.state.filterOptions.minRetweets = parseInt(document.getElementById('minRetweets').value) || 0;
+      this.state.filterOptions.author = document.getElementById('authorFilter').value.replace('@', '').trim();
+
+      this.applyFilters();
+      closeDialog();
+    });
+
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) closeDialog();
+    });
+  };
+
+  applyFilters = () => {
+    if (!this.state.lastExtraction) return;
+
+    this.state.filteredBookmarks = this.state.lastExtraction.filter(bookmark => {
+      const likes = parseInt(bookmark.likes) || 0;
+      const retweets = parseInt(bookmark.retweets) || 0;
+      const username = bookmark.username?.toLowerCase() || '';
+      const targetAuthor = this.state.filterOptions.author.toLowerCase();
+
+      return (
+        likes >= this.state.filterOptions.minLikes &&
+        retweets >= this.state.filterOptions.minRetweets &&
+        (!targetAuthor || username.includes(targetAuthor))
+      );
+    });
+
+    this.updateStatus(`Filtered to ${this.state.filteredBookmarks.length} bookmarks`);
+  };
+
+  // Performance metrics dialog
+  showMetricsDialog = () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 400px; width: 90%;
+    `;
+
+    const metrics = this.state.performanceMetrics;
+    const extractionTime = metrics.lastExtractionTime ? `${metrics.lastExtractionTime}ms` : 'N/A';
+    const analysisTime = metrics.lastAnalysisTime ? `${metrics.lastAnalysisTime}ms` : 'N/A';
+    const bookmarksCount = metrics.bookmarksExtracted || this.state.lastExtraction?.length || 0;
+
+    const providerDisplay = this.state.llmProvider === 'none'
+      ? 'LLM-Free Mode'
+      : (this.state.llmProvider || 'None').toUpperCase();
+
+    dialogContent.innerHTML = `
+      <h2 style="margin-top: 0; color: var(--text-color);">Performance Metrics</h2>
+      <div style="color: var(--text-color); margin-bottom: 16px;">
+        <p><strong>Last Extraction Time:</strong> ${extractionTime}</p>
+        <p><strong>Last Analysis Time:</strong> ${analysisTime}</p>
+        <p><strong>Bookmarks Extracted:</strong> ${bookmarksCount}</p>
+        <p><strong>Current Provider:</strong> ${providerDisplay}</p>
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button id="closeMetricsBtn" style="padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;">Close</button>
+      </div>
+    `;
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    const closeDialog = () => document.body.removeChild(dialog);
+    document.getElementById('closeMetricsBtn').addEventListener('click', closeDialog);
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) closeDialog();
+    });
+  };
+
+  // JSON export functionality
+  downloadJSON = () => {
+    const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
+    if (!bookmarks || bookmarks.length === 0) return;
+
+    const exportData = {
+      metadata: {
+        exportDate: new Date().toISOString(),
+        totalBookmarks: bookmarks.length,
+        version: '0.8.0',
+        llmProvider: this.state.llmProvider
+      },
+      analysis: this.state.aiAnalysis || null,
+      statistics: this.calculateBasicStats(bookmarks),
+      bookmarks: bookmarks
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `x-bookmarks-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this.updateStatus('Downloaded JSON file!');
+  };
+
+  // Retry operation with exponential backoff
+  retryOperation = async (operation, attempts = this.constants.API_RETRY_ATTEMPTS) => {
+    let lastError;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (i < attempts - 1) {
+          const delay = this.constants.API_RETRY_DELAY * Math.pow(2, i);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    throw lastError;
   };
 }
 
