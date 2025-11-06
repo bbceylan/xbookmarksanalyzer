@@ -8,6 +8,10 @@ class XBookmarkScanner {
     this.performanceMetrics = { startTime: 0, endTime: 0, articlesProcessed: 0 };
     console.log('[X Extractor] XBookmarkScanner initialized');
     this.sendProgress('Content script initialized.');
+
+    // Initialize Add to Analyzer button injection
+    this.injectedButtons = new Set(); // Track which tweets have buttons
+    this.initializeButtonInjection();
   }
 
   async sendProgress(status) {
@@ -241,6 +245,354 @@ class XBookmarkScanner {
     // Remove all non-digit characters except commas and dots
     const match = text.match(/([\d,.]+)/);
     return match ? match[1].replace(/,/g, '') : '';
+  }
+
+  // ============================================
+  // ADD TO ANALYZER BUTTON INJECTION
+  // ============================================
+
+  initializeButtonInjection() {
+    console.log('[X Extractor] Initializing Add to Analyzer button injection');
+
+    // Inject buttons on initial load
+    this.injectAddToAnalyzerButtons();
+
+    // Watch for new tweets being loaded (infinite scroll)
+    const observer = new MutationObserver((mutations) => {
+      // Debounce: only inject after mutations settle
+      if (this.injectionTimeout) clearTimeout(this.injectionTimeout);
+      this.injectionTimeout = setTimeout(() => {
+        this.injectAddToAnalyzerButtons();
+      }, 500);
+    });
+
+    // Observe the main timeline for new tweets
+    const timeline = document.querySelector('div[aria-label="Timeline: Your Home Timeline"]') ||
+                     document.querySelector('main[role="main"]') ||
+                     document.body;
+
+    if (timeline) {
+      observer.observe(timeline, {
+        childList: true,
+        subtree: true
+      });
+      console.log('[X Extractor] Mutation observer attached to timeline');
+    }
+  }
+
+  injectAddToAnalyzerButtons() {
+    const articles = document.querySelectorAll('article');
+    let injectedCount = 0;
+
+    articles.forEach(article => {
+      const tweetUrl = this.getTweetUrl(article);
+      if (!tweetUrl || this.injectedButtons.has(tweetUrl)) {
+        return; // Skip if already injected or no URL
+      }
+
+      // Find the action bar (like, retweet, reply buttons)
+      const actionBar = article.querySelector('div[role="group"]');
+      if (!actionBar) return;
+
+      // Create the custom button
+      const analyzerButton = this.createAnalyzerButton(article, tweetUrl);
+
+      // Inject the button into the action bar
+      const lastButton = actionBar.lastElementChild;
+      if (lastButton) {
+        actionBar.insertBefore(analyzerButton, lastButton.nextSibling);
+        this.injectedButtons.add(tweetUrl);
+        injectedCount++;
+      }
+    });
+
+    if (injectedCount > 0) {
+      console.log(`[X Extractor] Injected ${injectedCount} Add to Analyzer buttons`);
+    }
+  }
+
+  getTweetUrl(article) {
+    const link = article.querySelector('a[href*="/status/"]');
+    return link ? link.href : null;
+  }
+
+  createAnalyzerButton(article, tweetUrl) {
+    const container = document.createElement('div');
+    container.className = 'x-analyzer-button-container';
+    container.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      margin-left: 8px;
+    `;
+
+    const button = document.createElement('button');
+    button.className = 'x-analyzer-button';
+    button.setAttribute('aria-label', 'Add to Analyzer');
+    button.style.cssText = `
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      transition: background-color 0.2s;
+      color: rgb(113, 118, 123);
+      min-width: 32px;
+      min-height: 32px;
+    `;
+
+    // Icon (bookmark-plus icon)
+    button.innerHTML = `
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+        <path d="M4 4.5C4 3.12 5.119 2 6.5 2h11C18.881 2 20 3.12 20 4.5v18.44l-8-5.71-8 5.71V4.5zM6.5 4c-.276 0-.5.22-.5.5v14.56l6-4.29 6 4.29V4.5c0-.28-.224-.5-.5-.5h-11z"/>
+        <path d="M12 6v4m0 0v4m0-4h4m-4 0H8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    `;
+
+    // Hover effects
+    button.addEventListener('mouseenter', () => {
+      button.style.backgroundColor = 'rgba(29, 155, 240, 0.1)';
+      button.style.color = 'rgb(29, 155, 240)';
+    });
+
+    button.addEventListener('mouseleave', () => {
+      button.style.backgroundColor = 'transparent';
+      button.style.color = 'rgb(113, 118, 123)';
+    });
+
+    // Click handler
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.handleAddToAnalyzer(article, tweetUrl, button);
+    });
+
+    container.appendChild(button);
+    return container;
+  }
+
+  async handleAddToAnalyzer(article, tweetUrl, button) {
+    console.log('[X Extractor] Add to Analyzer clicked:', tweetUrl);
+
+    // Visual feedback
+    button.style.color = 'rgb(29, 155, 240)';
+    button.style.transform = 'scale(1.1)';
+    setTimeout(() => {
+      button.style.transform = 'scale(1)';
+    }, 200);
+
+    // Extract tweet data
+    const tweetData = this.extractTweetData(article);
+
+    // Show quick tagging dialog
+    this.showQuickTagDialog(tweetData, button);
+  }
+
+  showQuickTagDialog(tweetData, buttonEl) {
+    // Remove any existing dialog
+    const existingDialog = document.querySelector('.x-analyzer-tag-dialog');
+    if (existingDialog) existingDialog.remove();
+
+    // Create dialog
+    const dialog = document.createElement('div');
+    dialog.className = 'x-analyzer-tag-dialog';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      padding: 24px;
+      z-index: 10000;
+      min-width: 400px;
+      max-width: 500px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    `;
+
+    // Check for dark mode
+    const isDark = document.documentElement.style.backgroundColor === 'rgb(0, 0, 0)' ||
+                   document.body.style.backgroundColor === 'rgb(0, 0, 0)' ||
+                   window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    if (isDark) {
+      dialog.style.background = 'rgb(21, 32, 43)';
+      dialog.style.color = 'rgb(231, 233, 234)';
+    }
+
+    dialog.innerHTML = `
+      <div style="margin-bottom: 16px;">
+        <h3 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700;">Add to Analyzer</h3>
+        <p style="margin: 0; font-size: 14px; color: ${isDark ? 'rgb(139, 152, 165)' : 'rgb(83, 100, 113)'};">
+          by @${tweetData.username || 'unknown'}
+        </p>
+      </div>
+
+      <div style="margin-bottom: 16px; max-height: 100px; overflow-y: auto; padding: 12px; background: ${isDark ? 'rgb(15, 20, 25)' : 'rgb(247, 249, 249)'}; border-radius: 8px;">
+        <p style="margin: 0; font-size: 14px; line-height: 1.4;">
+          ${tweetData.text.substring(0, 200)}${tweetData.text.length > 200 ? '...' : ''}
+        </p>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600;">
+          Quick Tags (optional)
+        </label>
+        <input
+          type="text"
+          id="x-analyzer-tags-input"
+          placeholder="e.g., important, to-read, ai"
+          style="width: 100%; padding: 10px 12px; border: 1px solid ${isDark ? 'rgb(56, 68, 77)' : 'rgb(207, 217, 222)'}; border-radius: 8px; font-size: 14px; background: ${isDark ? 'rgb(15, 20, 25)' : 'white'}; color: ${isDark ? 'rgb(231, 233, 234)' : 'rgb(15, 20, 25)'};"
+        />
+        <p style="margin: 8px 0 0 0; font-size: 12px; color: ${isDark ? 'rgb(139, 152, 165)' : 'rgb(83, 100, 113)'};">
+          Separate tags with commas
+        </p>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600;">
+          Notes (optional)
+        </label>
+        <textarea
+          id="x-analyzer-notes-input"
+          placeholder="Add any notes about this tweet..."
+          style="width: 100%; padding: 10px 12px; border: 1px solid ${isDark ? 'rgb(56, 68, 77)' : 'rgb(207, 217, 222)'}; border-radius: 8px; font-size: 14px; min-height: 60px; resize: vertical; background: ${isDark ? 'rgb(15, 20, 25)' : 'white'}; color: ${isDark ? 'rgb(231, 233, 234)' : 'rgb(15, 20, 25)'}; font-family: inherit;"
+        ></textarea>
+      </div>
+
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="x-analyzer-cancel" style="padding: 10px 24px; background: transparent; border: 1px solid ${isDark ? 'rgb(56, 68, 77)' : 'rgb(207, 217, 222)'}; border-radius: 9999px; cursor: pointer; font-weight: 600; font-size: 14px; color: ${isDark ? 'rgb(231, 233, 234)' : 'rgb(15, 20, 25)'}; transition: background-color 0.2s;">
+          Cancel
+        </button>
+        <button id="x-analyzer-save" style="padding: 10px 24px; background: rgb(29, 155, 240); border: none; border-radius: 9999px; cursor: pointer; font-weight: 600; font-size: 14px; color: white; transition: background-color 0.2s;">
+          Save to Analyzer
+        </button>
+      </div>
+    `;
+
+    // Backdrop
+    const backdrop = document.createElement('div');
+    backdrop.className = 'x-analyzer-backdrop';
+    backdrop.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 9999;
+    `;
+
+    // Add to DOM
+    document.body.appendChild(backdrop);
+    document.body.appendChild(dialog);
+
+    // Focus the tags input
+    const tagsInput = dialog.querySelector('#x-analyzer-tags-input');
+    setTimeout(() => tagsInput.focus(), 100);
+
+    // Event handlers
+    const closeDialog = () => {
+      backdrop.remove();
+      dialog.remove();
+    };
+
+    backdrop.addEventListener('click', closeDialog);
+
+    dialog.querySelector('#x-analyzer-cancel').addEventListener('click', closeDialog);
+
+    dialog.querySelector('#x-analyzer-save').addEventListener('click', async () => {
+      const tags = tagsInput.value
+        .split(',')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const notes = dialog.querySelector('#x-analyzer-notes-input').value.trim();
+
+      await this.saveToAnalyzer(tweetData, tags, notes);
+
+      // Visual confirmation
+      buttonEl.style.color = 'rgb(0, 186, 124)'; // Green checkmark color
+      buttonEl.innerHTML = `
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+        </svg>
+      `;
+
+      // Show toast notification
+      this.showToast('Saved to Analyzer! ✓');
+
+      closeDialog();
+    });
+  }
+
+  async saveToAnalyzer(tweetData, tags, notes) {
+    try {
+      // Get existing manual bookmarks
+      const result = await chrome.storage.local.get('manualBookmarks');
+      const manualBookmarks = result.manualBookmarks || [];
+
+      // Add timestamp
+      const bookmarkWithMetadata = {
+        ...tweetData,
+        savedAt: new Date().toISOString(),
+        customTags: tags,
+        notes: notes,
+        source: 'manual'
+      };
+
+      // Check for duplicates
+      const exists = manualBookmarks.some(b => b.url === tweetData.url);
+      if (!exists) {
+        manualBookmarks.unshift(bookmarkWithMetadata);
+      } else {
+        // Update existing
+        const index = manualBookmarks.findIndex(b => b.url === tweetData.url);
+        manualBookmarks[index] = {
+          ...manualBookmarks[index],
+          ...bookmarkWithMetadata
+        };
+      }
+
+      // Save to storage
+      await chrome.storage.local.set({ manualBookmarks });
+
+      console.log('[X Extractor] Saved to analyzer:', tweetData.url);
+    } catch (error) {
+      console.error('[X Extractor] Error saving to analyzer:', error);
+      this.showToast('Error saving bookmark', true);
+    }
+  }
+
+  showToast(message, isError = false) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: ${isError ? 'rgb(244, 33, 46)' : 'rgb(0, 186, 124)'};
+      color: white;
+      padding: 12px 24px;
+      border-radius: 9999px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 10001;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    `;
+    toast.textContent = message;
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.transition = 'opacity 0.3s';
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 2000);
   }
 }
 
