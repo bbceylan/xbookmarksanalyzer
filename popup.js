@@ -1,4 +1,4 @@
-// X Bookmarks Analyzer with AI - Popup Script v0.7.0
+// X Bookmarks Analyzer with AI - Popup Script v0.12.1
 
 class PopupController {
   constructor() {
@@ -221,12 +221,42 @@ class PopupController {
   };
 
   loadLastExtraction = async () => {
-    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis', 'performanceMetrics']);
+    const result = await chrome.storage.local.get(['lastExtraction', 'aiAnalysis', 'performanceMetrics', 'manualBookmarks']);
+
+    // Merge native and manual bookmarks for unified view
+    let allBookmarks = [];
+
     if (result.lastExtraction) {
-      this.state.lastExtraction = result.lastExtraction.bookmarks;
+      allBookmarks = result.lastExtraction.bookmarks || [];
       this.updateExtractionStatus(result.lastExtraction.timestamp);
-      this.updateUI();
     }
+
+    // Add manual bookmarks with source indicator
+    if (result.manualBookmarks && result.manualBookmarks.length > 0) {
+      allBookmarks = [...allBookmarks, ...result.manualBookmarks];
+    }
+
+    // Remove duplicates based on URL (keep most recent)
+    const uniqueBookmarks = [];
+    const seenUrls = new Set();
+
+    // Sort by savedAt/timestamp to keep most recent
+    allBookmarks.sort((a, b) => {
+      const dateA = new Date(a.savedAt || a.dateTime || 0);
+      const dateB = new Date(b.savedAt || b.dateTime || 0);
+      return dateB - dateA;
+    });
+
+    for (const bookmark of allBookmarks) {
+      if (bookmark.url && !seenUrls.has(bookmark.url)) {
+        uniqueBookmarks.push(bookmark);
+        seenUrls.add(bookmark.url);
+      }
+    }
+
+    this.state.lastExtraction = uniqueBookmarks;
+    this.updateUI();
+
     if (result.aiAnalysis) {
       this.state.aiAnalysis = result.aiAnalysis;
     }
