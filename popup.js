@@ -472,7 +472,7 @@ class PopupController {
     this.updateUI();
   };
 
-  handleScanComplete = async (bookmarks, performanceData) => {
+  handleScanComplete = async (bookmarks, performanceData, isQuickScan = false) => {
     this.state.lastExtraction = bookmarks;
 
     // Store performance metrics
@@ -489,7 +489,13 @@ class PopupController {
       performanceMetrics: this.state.performanceMetrics
     });
 
-    this.updateStatus(`Successfully extracted ${bookmarks.length} bookmarks`);
+    this.updateStatus(`Successfully extracted ${bookmarks.length} bookmark${bookmarks.length !== 1 ? 's' : ''}`);
+
+    // Add helpful feedback for quick scans with few bookmarks
+    if (isQuickScan && bookmarks.length < 20) {
+      this.updateStatus(`⚠️ Only ${bookmarks.length} visible bookmark${bookmarks.length !== 1 ? 's' : ''} scanned. Use "Scan All Bookmarks" to load and scan ALL your bookmarks!`);
+    }
+
     if (bookmarks.length > this.constants.MAX_SAFE_BOOKMARKS) {
       this.updateStatus('Warning: Large bookmark set detected. Consider batch processing.');
     }
@@ -509,7 +515,7 @@ class PopupController {
   };
 
   handleScan = () => {
-    this.updateStatus('Scanning bookmarks...');
+    this.updateStatus('Quick scanning visible bookmarks only...');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
       chrome.tabs.sendMessage(tabs[0].id, {
         action: 'scanBookmarks'
@@ -519,7 +525,7 @@ class PopupController {
           return;
         }
         if (response && response.success) {
-          this.handleScanComplete(response.tweets || [], response.performance);
+          this.handleScanComplete(response.tweets || [], response.performance, true);
         } else {
           this.updateStatus('Error: Failed to scan bookmarks.');
         }
@@ -528,7 +534,7 @@ class PopupController {
   };
 
   handleAutoScroll = () => {
-    this.updateStatus('Auto-scrolling and scanning...');
+    this.updateStatus('🔄 Auto-scrolling to load all bookmarks... (this may take a minute)');
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
       const tabId = tabs[0].id;
 
@@ -572,10 +578,25 @@ class PopupController {
           return;
         }
 
-        // After scrolling completes successfully, scan
-        this.updateStatus('Auto-scroll complete. Scanning bookmarks...');
+        // After scrolling completes successfully, scan all loaded bookmarks
+        this.updateStatus('✓ Auto-scroll complete. Now scanning all loaded bookmarks...');
         setTimeout(() => {
-          this.handleScan();
+          // Scan after auto-scroll - this is NOT a quick scan
+          chrome.tabs.query({active: true, currentWindow: true}, tabs => {
+            chrome.tabs.sendMessage(tabs[0].id, {
+              action: 'scanBookmarks'
+            }, (response) => {
+              if (chrome.runtime.lastError) {
+                this.updateStatus('Error: Could not connect to page. Please refresh and try again.');
+                return;
+              }
+              if (response && response.success) {
+                this.handleScanComplete(response.tweets || [], response.performance, false);
+              } else {
+                this.updateStatus('Error: Failed to scan bookmarks.');
+              }
+            });
+          });
         }, this.constants.POST_SCAN_DELAY);
       });
     });
@@ -1225,12 +1246,15 @@ class PopupController {
 
   copyToClipboard = () => {
     const md = this.generateMarkdown();
-    if (!md) return;
+    if (!md) {
+      this.updateStatus('⚠️ No bookmarks to copy. Please scan bookmarks first.');
+      return;
+    }
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(md)
         .then(() => {
-          this.updateStatus('Copied to clipboard!');
+          this.updateStatus(`✓ Copied ${this.state.lastExtraction.length} bookmark${this.state.lastExtraction.length !== 1 ? 's' : ''} to clipboard!`);
         })
         .catch(err => {
           console.error('Clipboard error:', err);
@@ -1249,11 +1273,15 @@ class PopupController {
     document.body.appendChild(textarea);
     textarea.select();
     try {
-      document.execCommand('copy');
-      this.updateStatus('Copied to clipboard (fallback)!');
+      const successful = document.execCommand('copy');
+      if (successful) {
+        this.updateStatus(`✓ Copied ${this.state.lastExtraction.length} bookmark${this.state.lastExtraction.length !== 1 ? 's' : ''} to clipboard!`);
+      } else {
+        this.updateStatus('⚠️ Failed to copy. Please try using a download option instead.');
+      }
     } catch (err) {
       console.error('Fallback copy failed:', err);
-      this.updateStatus('Failed to copy. Please try again.');
+      this.updateStatus('⚠️ Clipboard copy failed. Please try using a download option instead.');
     }
     document.body.removeChild(textarea);
   };
