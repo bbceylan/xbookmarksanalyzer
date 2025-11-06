@@ -25,7 +25,10 @@ class PopupController {
         minRetweets: 0,
         author: '',
         dateFrom: '',
-        dateTo: ''
+        dateTo: '',
+        readStatus: 'all', // 'all', 'read', 'unread'
+        hasNotes: false,
+        collections: []
       },
       progress: {
         current: 0,
@@ -36,7 +39,13 @@ class PopupController {
         lastExtractionTime: 0,
         lastAnalysisTime: 0,
         bookmarksExtracted: 0
-      }
+      },
+      // NEW FEATURES v0.10.0
+      bookmarkMetadata: {}, // { url: { read: bool, notes: string, customTags: [], favorite: bool, collection: string } }
+      collections: [], // { id, name, color, bookmarkCount }
+      savedSearches: [], // { id, name, query, filters }
+      viewMode: 'list', // 'list', 'grid', 'card'
+      reminders: [] // { bookmarkUrl, reminderDate, message }
     };
 
     this.constants = {
@@ -88,12 +97,23 @@ class PopupController {
       metricsBtn: document.getElementById('metricsBtn'),
       mainContent: document.getElementById('mainContent'),
       closeBtn: document.getElementById('closeBtn'),
-      settingsBtn: document.getElementById('settingsBtn')
+      settingsBtn: document.getElementById('settingsBtn'),
+      // NEW v0.10.0
+      viewModeBtn: document.getElementById('viewModeBtn'),
+      collectionsBtn: document.getElementById('collectionsBtn'),
+      savedSearchesBtn: document.getElementById('savedSearchesBtn'),
+      exportNotionBtn: document.getElementById('exportNotionBtn'),
+      exportObsidianBtn: document.getElementById('exportObsidianBtn'),
+      sentimentBtn: document.getElementById('sentimentBtn'),
+      aiQABtn: document.getElementById('aiQABtn')
     };
   };
 
   loadSettings = async () => {
-    const settings = await chrome.storage.local.get(['settings', 'apiKey', 'llmProvider']);
+    const settings = await chrome.storage.local.get([
+      'settings', 'apiKey', 'llmProvider', 'bookmarkMetadata',
+      'collections', 'savedSearches', 'viewMode', 'reminders'
+    ]);
     if (settings.settings) {
       this.state.isDarkMode = settings.settings.darkMode || false;
       this.updateTheme();
@@ -104,13 +124,34 @@ class PopupController {
     if (settings.llmProvider) {
       this.state.llmProvider = settings.llmProvider;
     }
+    // NEW v0.10.0
+    if (settings.bookmarkMetadata) {
+      this.state.bookmarkMetadata = settings.bookmarkMetadata;
+    }
+    if (settings.collections) {
+      this.state.collections = settings.collections;
+    }
+    if (settings.savedSearches) {
+      this.state.savedSearches = settings.savedSearches;
+    }
+    if (settings.viewMode) {
+      this.state.viewMode = settings.viewMode;
+    }
+    if (settings.reminders) {
+      this.state.reminders = settings.reminders;
+    }
   };
 
   saveSettings = async () => {
     await chrome.storage.local.set({
       settings: {
         darkMode: this.state.isDarkMode
-      }
+      },
+      bookmarkMetadata: this.state.bookmarkMetadata,
+      collections: this.state.collections,
+      savedSearches: this.state.savedSearches,
+      viewMode: this.state.viewMode,
+      reminders: this.state.reminders
     });
   };
 
@@ -202,6 +243,15 @@ class PopupController {
     this.elements.closeBtn?.addEventListener('click', () => window.close());
     this.elements.settingsBtn?.addEventListener('click', () => this.showSettingsDialog());
 
+    // NEW v0.10.0 - Additional features
+    this.elements.viewModeBtn?.addEventListener('click', () => this.toggleViewMode());
+    this.elements.collectionsBtn?.addEventListener('click', () => this.showCollectionsDialog());
+    this.elements.savedSearchesBtn?.addEventListener('click', () => this.showSavedSearchesDialog());
+    this.elements.exportNotionBtn?.addEventListener('click', () => this.downloadNotion());
+    this.elements.exportObsidianBtn?.addEventListener('click', () => this.downloadObsidian());
+    this.elements.sentimentBtn?.addEventListener('click', () => this.showSentimentAnalysis());
+    this.elements.aiQABtn?.addEventListener('click', () => this.showAIQADialog());
+
     // Listen for messages from content script
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'progressUpdate') {
@@ -224,6 +274,9 @@ class PopupController {
     if (this.elements.exportHtmlBtn) this.elements.exportHtmlBtn.disabled = !hasData;
     if (this.elements.copyClipboardBtn) this.elements.copyClipboardBtn.disabled = !hasData;
     if (this.elements.analyzeAiBtn) this.elements.analyzeAiBtn.disabled = !hasData;
+    // NEW v0.10.0
+    if (this.elements.exportNotionBtn) this.elements.exportNotionBtn.disabled = !hasData;
+    if (this.elements.exportObsidianBtn) this.elements.exportObsidianBtn.disabled = !hasData;
   };
 
   updateProgressBar = () => {
@@ -1230,7 +1283,7 @@ class PopupController {
     const dialogContent = document.createElement('div');
     dialogContent.style.cssText = `
       background: var(--bg-color); padding: 24px; border-radius: 8px;
-      max-width: 400px; width: 90%; max-height: 80vh; overflow-y: auto;
+      max-width: 450px; width: 90%; max-height: 80vh; overflow-y: auto;
     `;
 
     dialogContent.innerHTML = `
@@ -1256,6 +1309,37 @@ class PopupController {
                  style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
         </label>
       </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          Date From:
+          <input type="date" id="dateFrom" value="${this.state.filterOptions.dateFrom}"
+                 style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+        </label>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          Date To:
+          <input type="date" id="dateTo" value="${this.state.filterOptions.dateTo}"
+                 style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+        </label>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 8px; color: var(--text-color);">
+          Read Status:
+          <select id="readStatus" style="width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+            <option value="all" ${this.state.filterOptions.readStatus === 'all' ? 'selected' : ''}>All</option>
+            <option value="read" ${this.state.filterOptions.readStatus === 'read' ? 'selected' : ''}>Read Only</option>
+            <option value="unread" ${this.state.filterOptions.readStatus === 'unread' ? 'selected' : ''}>Unread Only</option>
+          </select>
+        </label>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; color: var(--text-color); cursor: pointer;">
+          <input type="checkbox" id="hasNotes" ${this.state.filterOptions.hasNotes ? 'checked' : ''}
+                 style="margin-right: 8px;">
+          Only show bookmarks with notes
+        </label>
+      </div>
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button id="resetBtn" style="padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;">Reset</button>
         <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;">Cancel</button>
@@ -1270,7 +1354,7 @@ class PopupController {
 
     document.getElementById('cancelBtn').addEventListener('click', closeDialog);
     document.getElementById('resetBtn').addEventListener('click', () => {
-      this.state.filterOptions = { minLikes: 0, minRetweets: 0, author: '', dateFrom: '', dateTo: '' };
+      this.state.filterOptions = { minLikes: 0, minRetweets: 0, author: '', dateFrom: '', dateTo: '', readStatus: 'all', hasNotes: false, collections: [] };
       this.state.filteredBookmarks = null;
       this.updateStatus(`Showing all ${this.state.lastExtraction?.length || 0} bookmarks`);
       closeDialog();
@@ -1280,6 +1364,10 @@ class PopupController {
       this.state.filterOptions.minLikes = parseInt(document.getElementById('minLikes').value) || 0;
       this.state.filterOptions.minRetweets = parseInt(document.getElementById('minRetweets').value) || 0;
       this.state.filterOptions.author = document.getElementById('authorFilter').value.replace('@', '').trim();
+      this.state.filterOptions.dateFrom = document.getElementById('dateFrom').value;
+      this.state.filterOptions.dateTo = document.getElementById('dateTo').value;
+      this.state.filterOptions.readStatus = document.getElementById('readStatus').value;
+      this.state.filterOptions.hasNotes = document.getElementById('hasNotes').checked;
 
       this.applyFilters();
       closeDialog();
@@ -1299,11 +1387,39 @@ class PopupController {
       const username = bookmark.username?.toLowerCase() || '';
       const targetAuthor = this.state.filterOptions.author.toLowerCase();
 
-      return (
-        likes >= this.state.filterOptions.minLikes &&
-        retweets >= this.state.filterOptions.minRetweets &&
-        (!targetAuthor || username.includes(targetAuthor))
-      );
+      // Basic filters
+      if (likes < this.state.filterOptions.minLikes) return false;
+      if (retweets < this.state.filterOptions.minRetweets) return false;
+      if (targetAuthor && !username.includes(targetAuthor)) return false;
+
+      // Date range filter
+      if (this.state.filterOptions.dateFrom || this.state.filterOptions.dateTo) {
+        const bookmarkDate = new Date(bookmark.dateTime);
+        if (this.state.filterOptions.dateFrom) {
+          const fromDate = new Date(this.state.filterOptions.dateFrom);
+          if (bookmarkDate < fromDate) return false;
+        }
+        if (this.state.filterOptions.dateTo) {
+          const toDate = new Date(this.state.filterOptions.dateTo);
+          toDate.setHours(23, 59, 59, 999); // Include full day
+          if (bookmarkDate > toDate) return false;
+        }
+      }
+
+      // Read status filter
+      if (this.state.filterOptions.readStatus !== 'all') {
+        const isRead = this.getReadStatus(bookmark.url);
+        if (this.state.filterOptions.readStatus === 'read' && !isRead) return false;
+        if (this.state.filterOptions.readStatus === 'unread' && isRead) return false;
+      }
+
+      // Has notes filter
+      if (this.state.filterOptions.hasNotes) {
+        const notes = this.getBookmarkNote(bookmark.url);
+        if (!notes || notes.trim() === '') return false;
+      }
+
+      return true;
     });
 
     this.updateStatus(`Filtered to ${this.state.filteredBookmarks.length} bookmarks`);
@@ -1756,7 +1872,7 @@ class PopupController {
 
     html += `
     <div class="footer">
-      <p>Exported with X Bookmarks Analyzer v0.9.0</p>
+      <p>Exported with X Bookmarks Analyzer v0.10.0</p>
       <p>Total bookmarks in this export: ${bookmarks.length}</p>
     </div>
   </div>
@@ -1790,6 +1906,156 @@ class PopupController {
     this.updateStatus('Downloaded HTML file!');
   };
 
+  // FEATURE: Notion Export
+  generateNotionMarkdown = () => {
+    const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
+    if (!bookmarks || bookmarks.length === 0) return '';
+
+    const lines = [];
+    lines.push('# X Bookmarks Export\n');
+    lines.push(`> Exported on ${new Date().toLocaleDateString()}\n`);
+    lines.push(`> Total: ${bookmarks.length} bookmarks\n\n`);
+
+    // Add database header for Notion
+    lines.push('## Bookmarks Database\n\n');
+
+    bookmarks.forEach((bookmark, index) => {
+      // Notion-style toggle blocks
+      lines.push(`### ${bookmark.displayName || 'Unknown'} (@${bookmark.username || 'unknown'})\n\n`);
+
+      if (bookmark.text) {
+        lines.push(`${bookmark.text}\n\n`);
+      }
+
+      // Properties in Notion format
+      lines.push('**Properties:**\n');
+      lines.push(`- **Author:** ${bookmark.displayName || 'Unknown'}\n`);
+      lines.push(`- **Username:** @${bookmark.username || 'unknown'}\n`);
+      lines.push(`- **Date:** ${bookmark.dateTime ? new Date(bookmark.dateTime).toLocaleDateString() : 'N/A'}\n`);
+      lines.push(`- **Likes:** ${bookmark.likes || 0}\n`);
+      lines.push(`- **Retweets:** ${bookmark.retweets || 0}\n`);
+      lines.push(`- **Replies:** ${bookmark.replies || 0}\n`);
+      if (bookmark.views) lines.push(`- **Views:** ${bookmark.views}\n`);
+      lines.push(`- **URL:** ${bookmark.url}\n`);
+
+      // Custom tags if any
+      const customTags = this.getCustomTags(bookmark.url);
+      if (customTags.length > 0) {
+        lines.push(`- **Tags:** ${customTags.join(', ')}\n`);
+      }
+
+      // Notes if any
+      const note = this.getBookmarkNote(bookmark.url);
+      if (note) {
+        lines.push(`\n**Notes:**\n> ${note}\n`);
+      }
+
+      lines.push('\n---\n\n');
+    });
+
+    return lines.join('');
+  };
+
+  downloadNotion = () => {
+    const md = this.generateNotionMarkdown();
+    if (!md) {
+      this.updateStatus('No bookmarks to export.');
+      return;
+    }
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `x-bookmarks-notion-${Date.now()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this.updateStatus('Downloaded Notion-compatible Markdown!');
+  };
+
+  // FEATURE: Obsidian Export
+  generateObsidianMarkdown = () => {
+    const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
+    if (!bookmarks || bookmarks.length === 0) return '';
+
+    const lines = [];
+    lines.push('# X Bookmarks Export\n\n');
+
+    // Obsidian metadata
+    lines.push('---\n');
+    lines.push(`export_date: ${new Date().toISOString()}\n`);
+    lines.push(`total_bookmarks: ${bookmarks.length}\n`);
+    lines.push('tags:\n');
+    lines.push('  - twitter\n');
+    lines.push('  - bookmarks\n');
+    if (this.state.aiAnalysis && this.state.aiAnalysis.tags) {
+      this.state.aiAnalysis.tags.slice(0, 5).forEach(tag => {
+        lines.push(`  - ${tag}\n`);
+      });
+    }
+    lines.push('---\n\n');
+
+    // Summary with backlinks
+    lines.push('## Summary\n\n');
+    lines.push(`This vault contains [[${bookmarks.length} bookmarks]] from X (Twitter).\n\n`);
+
+    bookmarks.forEach((bookmark, index) => {
+      // Create individual note for each bookmark
+      const safeFilename = `${bookmark.username}-${Date.now()}-${index}`.replace(/[^a-zA-Z0-9-]/g, '_');
+
+      lines.push(`## [[${safeFilename}|${bookmark.displayName || 'Unknown'}]]\n\n`);
+
+      if (bookmark.text) {
+        lines.push(`${bookmark.text}\n\n`);
+      }
+
+      // Wikilinks for tags
+      const customTags = this.getCustomTags(bookmark.url);
+      if (customTags.length > 0) {
+        lines.push('**Tags:** ');
+        lines.push(customTags.map(tag => `#${tag.replace(/\s+/g, '_')}`).join(' '));
+        lines.push('\n\n');
+      }
+
+      // Metadata
+      lines.push('**Metadata:**\n');
+      lines.push(`- Author: [[${bookmark.username || 'unknown'}]]\n`);
+      lines.push(`- Date: ${bookmark.dateTime ? new Date(bookmark.dateTime).toLocaleDateString() : 'N/A'}\n`);
+      lines.push(`- Engagement: ${bookmark.likes || 0}❤️ ${bookmark.retweets || 0}🔄 ${bookmark.replies || 0}💬\n`);
+      lines.push(`- [View on X](${bookmark.url})\n\n`);
+
+      // Notes as blockquote
+      const note = this.getBookmarkNote(bookmark.url);
+      if (note) {
+        lines.push('**My Notes:**\n');
+        lines.push(`> ${note}\n\n`);
+      }
+
+      lines.push('---\n\n');
+    });
+
+    return lines.join('');
+  };
+
+  downloadObsidian = () => {
+    const md = this.generateObsidianMarkdown();
+    if (!md) {
+      this.updateStatus('No bookmarks to export.');
+      return;
+    }
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `x-bookmarks-obsidian-${Date.now()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this.updateStatus('Downloaded Obsidian-compatible Markdown!');
+  };
+
   // FEATURE: Auto-save bookmarks
   enableAutoSave = (intervalMinutes = 5) => {
     if (this.autoSaveTimer) {
@@ -1812,7 +2078,829 @@ class PopupController {
     console.log(`[Auto-save] Enabled with ${intervalMinutes} minute interval`);
   };
 
-  // ====== END NEW FEATURES ======
+  // ====== NEW FEATURES v0.10.0 ======
+
+  // FEATURE: Read/Unread Status
+  toggleReadStatus = async (bookmarkUrl) => {
+    if (!this.state.bookmarkMetadata[bookmarkUrl]) {
+      this.state.bookmarkMetadata[bookmarkUrl] = { read: false, notes: '', customTags: [], favorite: false };
+    }
+    this.state.bookmarkMetadata[bookmarkUrl].read = !this.state.bookmarkMetadata[bookmarkUrl].read;
+    await this.saveSettings();
+    return this.state.bookmarkMetadata[bookmarkUrl].read;
+  };
+
+  markAsRead = async (bookmarkUrl) => {
+    if (!this.state.bookmarkMetadata[bookmarkUrl]) {
+      this.state.bookmarkMetadata[bookmarkUrl] = { read: true, notes: '', customTags: [], favorite: false };
+    } else {
+      this.state.bookmarkMetadata[bookmarkUrl].read = true;
+    }
+    await this.saveSettings();
+  };
+
+  markAsUnread = async (bookmarkUrl) => {
+    if (!this.state.bookmarkMetadata[bookmarkUrl]) {
+      this.state.bookmarkMetadata[bookmarkUrl] = { read: false, notes: '', customTags: [], favorite: false };
+    } else {
+      this.state.bookmarkMetadata[bookmarkUrl].read = false;
+    }
+    await this.saveSettings();
+  };
+
+  getReadStatus = (bookmarkUrl) => {
+    return this.state.bookmarkMetadata[bookmarkUrl]?.read || false;
+  };
+
+  // FEATURE: Personal Notes
+  setBookmarkNote = async (bookmarkUrl, note) => {
+    if (!this.state.bookmarkMetadata[bookmarkUrl]) {
+      this.state.bookmarkMetadata[bookmarkUrl] = { read: false, notes: '', customTags: [], favorite: false };
+    }
+    this.state.bookmarkMetadata[bookmarkUrl].notes = note;
+    await this.saveSettings();
+  };
+
+  getBookmarkNote = (bookmarkUrl) => {
+    return this.state.bookmarkMetadata[bookmarkUrl]?.notes || '';
+  };
+
+  showNotesDialog = (bookmark) => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Add Note';
+    dialogContent.appendChild(title);
+
+    const bookmarkInfo = document.createElement('p');
+    bookmarkInfo.style.cssText = 'color: var(--disabled-color); font-size: 13px; margin-bottom: 16px;';
+    bookmarkInfo.textContent = `@${bookmark.username}: ${bookmark.text?.substring(0, 60)}...`;
+    dialogContent.appendChild(bookmarkInfo);
+
+    const textarea = document.createElement('textarea');
+    textarea.value = this.getBookmarkNote(bookmark.url);
+    textarea.placeholder = 'Add your personal notes here...';
+    textarea.style.cssText = `
+      width: 100%; min-height: 120px; padding: 12px; margin-bottom: 16px;
+      border: 1px solid var(--border-color); border-radius: 8px;
+      background: var(--bg-color); color: var(--text-color); font-size: 14px;
+      font-family: inherit; resize: vertical;
+    `;
+    dialogContent.appendChild(textarea);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    cancelBtn.addEventListener('click', () => document.body.removeChild(dialog));
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save Note';
+    saveBtn.style.cssText = 'padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;';
+    saveBtn.addEventListener('click', async () => {
+      await this.setBookmarkNote(bookmark.url, textarea.value);
+      this.updateStatus('Note saved successfully!');
+      document.body.removeChild(dialog);
+    });
+
+    buttonContainer.appendChild(cancelBtn);
+    buttonContainer.appendChild(saveBtn);
+    dialogContent.appendChild(buttonContainer);
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    textarea.focus();
+  };
+
+  // FEATURE: Custom Tags
+  addCustomTag = async (bookmarkUrl, tag) => {
+    if (!this.state.bookmarkMetadata[bookmarkUrl]) {
+      this.state.bookmarkMetadata[bookmarkUrl] = { read: false, notes: '', customTags: [], favorite: false };
+    }
+    if (!this.state.bookmarkMetadata[bookmarkUrl].customTags) {
+      this.state.bookmarkMetadata[bookmarkUrl].customTags = [];
+    }
+    if (!this.state.bookmarkMetadata[bookmarkUrl].customTags.includes(tag)) {
+      this.state.bookmarkMetadata[bookmarkUrl].customTags.push(tag);
+      await this.saveSettings();
+    }
+  };
+
+  removeCustomTag = async (bookmarkUrl, tag) => {
+    if (this.state.bookmarkMetadata[bookmarkUrl]?.customTags) {
+      this.state.bookmarkMetadata[bookmarkUrl].customTags =
+        this.state.bookmarkMetadata[bookmarkUrl].customTags.filter(t => t !== tag);
+      await this.saveSettings();
+    }
+  };
+
+  getCustomTags = (bookmarkUrl) => {
+    return this.state.bookmarkMetadata[bookmarkUrl]?.customTags || [];
+  };
+
+  showTagsDialog = (bookmark) => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Manage Tags';
+    dialogContent.appendChild(title);
+
+    const bookmarkInfo = document.createElement('p');
+    bookmarkInfo.style.cssText = 'color: var(--disabled-color); font-size: 13px; margin-bottom: 16px;';
+    bookmarkInfo.textContent = `@${bookmark.username}: ${bookmark.text?.substring(0, 60)}...`;
+    dialogContent.appendChild(bookmarkInfo);
+
+    // Current tags
+    const tagsContainer = document.createElement('div');
+    tagsContainer.id = 'current-tags';
+    tagsContainer.style.cssText = 'margin-bottom: 16px; min-height: 40px;';
+
+    const renderTags = () => {
+      tagsContainer.innerHTML = '';
+      const tags = this.getCustomTags(bookmark.url);
+      if (tags.length === 0) {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.style.cssText = 'color: var(--disabled-color); font-style: italic;';
+        emptyMsg.textContent = 'No tags yet';
+        tagsContainer.appendChild(emptyMsg);
+      } else {
+        tags.forEach(tag => {
+          const tagSpan = document.createElement('span');
+          tagSpan.style.cssText = `
+            display: inline-block; background: var(--primary-color); color: white;
+            padding: 6px 12px; margin: 4px; border-radius: 16px; font-size: 13px;
+          `;
+          tagSpan.textContent = tag;
+
+          const removeBtn = document.createElement('button');
+          removeBtn.textContent = '×';
+          removeBtn.style.cssText = `
+            background: none; border: none; color: white; font-size: 18px;
+            cursor: pointer; margin-left: 6px; padding: 0 4px;
+          `;
+          removeBtn.addEventListener('click', async () => {
+            await this.removeCustomTag(bookmark.url, tag);
+            renderTags();
+          });
+
+          tagSpan.appendChild(removeBtn);
+          tagsContainer.appendChild(tagSpan);
+        });
+      }
+    };
+    renderTags();
+    dialogContent.appendChild(tagsContainer);
+
+    // Add tag input
+    const inputContainer = document.createElement('div');
+    inputContainer.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
+
+    const tagInput = document.createElement('input');
+    tagInput.type = 'text';
+    tagInput.placeholder = 'Add new tag...';
+    tagInput.style.cssText = `
+      flex: 1; padding: 8px 12px; border: 1px solid var(--border-color);
+      border-radius: 4px; background: var(--bg-color); color: var(--text-color);
+    `;
+
+    const addTagBtn = document.createElement('button');
+    addTagBtn.textContent = 'Add';
+    addTagBtn.style.cssText = 'padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;';
+    addTagBtn.addEventListener('click', async () => {
+      const tag = tagInput.value.trim();
+      if (tag) {
+        await this.addCustomTag(bookmark.url, tag);
+        tagInput.value = '';
+        renderTags();
+      }
+    });
+
+    tagInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        addTagBtn.click();
+      }
+    });
+
+    inputContainer.appendChild(tagInput);
+    inputContainer.appendChild(addTagBtn);
+    dialogContent.appendChild(inputContainer);
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'width: 100%; padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+    dialogContent.appendChild(closeBtn);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    tagInput.focus();
+  };
+
+  // FEATURE: Saved Searches
+  saveCurrentSearch = async () => {
+    const searchName = prompt('Name this search:');
+    if (!searchName) return;
+
+    const savedSearch = {
+      id: Date.now().toString(),
+      name: searchName,
+      query: this.state.searchQuery,
+      filters: { ...this.state.filterOptions }
+    };
+
+    this.state.savedSearches.push(savedSearch);
+    await this.saveSettings();
+    this.updateStatus(`Search "${searchName}" saved!`);
+  };
+
+  loadSavedSearch = async (searchId) => {
+    const search = this.state.savedSearches.find(s => s.id === searchId);
+    if (!search) return;
+
+    this.state.searchQuery = search.query;
+    this.state.filterOptions = { ...search.filters };
+
+    if (this.elements.searchInput) {
+      this.elements.searchInput.value = search.query;
+    }
+
+    this.performSearch();
+    this.applyFilters();
+    this.updateStatus(`Loaded search: ${search.name}`);
+  };
+
+  deleteSavedSearch = async (searchId) => {
+    this.state.savedSearches = this.state.savedSearches.filter(s => s.id !== searchId);
+    await this.saveSettings();
+  };
+
+  showSavedSearchesDialog = () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Saved Searches';
+    dialogContent.appendChild(title);
+
+    if (this.state.savedSearches.length === 0) {
+      const emptyMsg = document.createElement('p');
+      emptyMsg.style.cssText = 'color: var(--disabled-color); text-align: center; padding: 20px;';
+      emptyMsg.textContent = 'No saved searches yet';
+      dialogContent.appendChild(emptyMsg);
+    } else {
+      this.state.savedSearches.forEach(search => {
+        const searchItem = document.createElement('div');
+        searchItem.style.cssText = `
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 12px; margin-bottom: 8px; background: var(--hover-color);
+          border-radius: 6px; border: 1px solid var(--border-color);
+        `;
+
+        const info = document.createElement('div');
+        info.style.cssText = 'flex: 1;';
+
+        const name = document.createElement('div');
+        name.style.cssText = 'color: var(--text-color); font-weight: 600; margin-bottom: 4px;';
+        name.textContent = search.name;
+
+        const query = document.createElement('div');
+        query.style.cssText = 'color: var(--disabled-color); font-size: 12px;';
+        query.textContent = search.query || '(no query)';
+
+        info.appendChild(name);
+        info.appendChild(query);
+
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display: flex; gap: 8px;';
+
+        const loadBtn = document.createElement('button');
+        loadBtn.textContent = 'Load';
+        loadBtn.style.cssText = 'padding: 6px 12px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer; font-size: 12px;';
+        loadBtn.addEventListener('click', () => {
+          this.loadSavedSearch(search.id);
+          document.body.removeChild(dialog);
+        });
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = '×';
+        deleteBtn.style.cssText = 'padding: 6px 10px; border: none; background: var(--danger-color); color: white; border-radius: 4px; cursor: pointer; font-size: 14px;';
+        deleteBtn.addEventListener('click', async () => {
+          await this.deleteSavedSearch(search.id);
+          document.body.removeChild(dialog);
+          this.showSavedSearchesDialog();
+        });
+
+        actions.appendChild(loadBtn);
+        actions.appendChild(deleteBtn);
+
+        searchItem.appendChild(info);
+        searchItem.appendChild(actions);
+        dialogContent.appendChild(searchItem);
+      });
+    }
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display: flex; gap: 8px; justify-content: space-between; margin-top: 16px;';
+
+    const saveCurrentBtn = document.createElement('button');
+    saveCurrentBtn.textContent = 'Save Current Search';
+    saveCurrentBtn.style.cssText = 'flex: 1; padding: 10px; border: none; background: var(--success-color); color: white; border-radius: 4px; cursor: pointer;';
+    saveCurrentBtn.addEventListener('click', async () => {
+      await this.saveCurrentSearch();
+      document.body.removeChild(dialog);
+      this.showSavedSearchesDialog();
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'padding: 10px 20px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+
+    buttonContainer.appendChild(saveCurrentBtn);
+    buttonContainer.appendChild(closeBtn);
+    dialogContent.appendChild(buttonContainer);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+  };
+
+  // FEATURE: View Mode Toggle
+  toggleViewMode = async () => {
+    const modes = ['list', 'grid', 'card'];
+    const currentIndex = modes.indexOf(this.state.viewMode);
+    this.state.viewMode = modes[(currentIndex + 1) % modes.length];
+    await this.saveSettings();
+    this.updateStatus(`View mode: ${this.state.viewMode}`);
+  };
+
+  // FEATURE: Collections
+  createCollection = async (name, color = '#1DA1F2') => {
+    const collection = {
+      id: Date.now().toString(),
+      name,
+      color,
+      bookmarkCount: 0
+    };
+    this.state.collections.push(collection);
+    await this.saveSettings();
+    return collection;
+  };
+
+  addToCollection = async (bookmarkUrl, collectionId) => {
+    if (!this.state.bookmarkMetadata[bookmarkUrl]) {
+      this.state.bookmarkMetadata[bookmarkUrl] = { read: false, notes: '', customTags: [], favorite: false };
+    }
+    this.state.bookmarkMetadata[bookmarkUrl].collection = collectionId;
+    await this.saveSettings();
+  };
+
+  showCollectionsDialog = () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Collections';
+    dialogContent.appendChild(title);
+
+    if (this.state.collections.length === 0) {
+      const emptyMsg = document.createElement('p');
+      emptyMsg.style.cssText = 'color: var(--disabled-color); text-align: center; padding: 20px;';
+      emptyMsg.textContent = 'No collections yet. Create one to organize your bookmarks!';
+      dialogContent.appendChild(emptyMsg);
+    } else {
+      this.state.collections.forEach(collection => {
+        const collectionItem = document.createElement('div');
+        collectionItem.style.cssText = `
+          padding: 12px; margin-bottom: 8px; background: var(--hover-color);
+          border-radius: 6px; border-left: 4px solid ${collection.color};
+        `;
+
+        const name = document.createElement('div');
+        name.style.cssText = 'color: var(--text-color); font-weight: 600;';
+        name.textContent = collection.name;
+
+        collectionItem.appendChild(name);
+        dialogContent.appendChild(collectionItem);
+      });
+    }
+
+    const createBtn = document.createElement('button');
+    createBtn.textContent = '+ Create Collection';
+    createBtn.style.cssText = 'width: 100%; padding: 12px; margin: 16px 0 8px 0; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;';
+    createBtn.addEventListener('click', () => {
+      const name = prompt('Collection name:');
+      if (name) {
+        this.createCollection(name);
+        document.body.removeChild(dialog);
+        this.showCollectionsDialog();
+      }
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'width: 100%; padding: 12px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+
+    dialogContent.appendChild(createBtn);
+    dialogContent.appendChild(closeBtn);
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+  };
+
+  // FEATURE: Sentiment Analysis
+  analyzeSentiment = (text) => {
+    // Simple rule-based sentiment analysis
+    const positiveWords = ['good', 'great', 'awesome', 'excellent', 'amazing', 'love', 'best', 'wonderful', 'fantastic', 'happy', 'excited', 'perfect', 'brilliant'];
+    const negativeWords = ['bad', 'terrible', 'awful', 'hate', 'worst', 'horrible', 'disappointed', 'sad', 'angry', 'frustrating', 'annoying', 'poor'];
+
+    const lowerText = text.toLowerCase();
+    let score = 0;
+
+    positiveWords.forEach(word => {
+      if (lowerText.includes(word)) score += 1;
+    });
+
+    negativeWords.forEach(word => {
+      if (lowerText.includes(word)) score -= 1;
+    });
+
+    if (score > 0) return 'positive';
+    if (score < 0) return 'negative';
+    return 'neutral';
+  };
+
+  showSentimentAnalysis = () => {
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      this.updateStatus('No bookmarks to analyze.');
+      return;
+    }
+
+    const sentiments = { positive: 0, neutral: 0, negative: 0 };
+
+    this.state.lastExtraction.forEach(bookmark => {
+      if (bookmark.text) {
+        const sentiment = this.analyzeSentiment(bookmark.text);
+        sentiments[sentiment]++;
+      }
+    });
+
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 400px; width: 90%;
+    `;
+
+    const total = this.state.lastExtraction.length;
+    const posPercent = Math.round((sentiments.positive / total) * 100);
+    const neuPercent = Math.round((sentiments.neutral / total) * 100);
+    const negPercent = Math.round((sentiments.negative / total) * 100);
+
+    dialogContent.innerHTML = `
+      <h2 style="margin-top: 0; color: var(--text-color);">Sentiment Analysis</h2>
+      <div style="margin: 20px 0;">
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="color: var(--text-color);">😊 Positive</span>
+            <span style="color: var(--text-color); font-weight: 600;">${sentiments.positive} (${posPercent}%)</span>
+          </div>
+          <div style="background: var(--border-color); height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="background: var(--success-color); height: 100%; width: ${posPercent}%;"></div>
+          </div>
+        </div>
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="color: var(--text-color);">😐 Neutral</span>
+            <span style="color: var(--text-color); font-weight: 600;">${sentiments.neutral} (${neuPercent}%)</span>
+          </div>
+          <div style="background: var(--border-color); height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="background: var(--disabled-color); height: 100%; width: ${neuPercent}%;"></div>
+          </div>
+        </div>
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="color: var(--text-color);">😞 Negative</span>
+            <span style="color: var(--text-color); font-weight: 600;">${sentiments.negative} (${negPercent}%)</span>
+          </div>
+          <div style="background: var(--border-color); height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="background: var(--danger-color); height: 100%; width: ${negPercent}%;"></div>
+          </div>
+        </div>
+      </div>
+      <button id="closeDialog" style="width: 100%; padding: 12px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;">Close</button>
+    `;
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    const closeDialog = () => document.body.removeChild(dialog);
+    document.getElementById('closeDialog').addEventListener('click', closeDialog);
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) closeDialog();
+    });
+  };
+
+  // FEATURE: AI Q&A over bookmarks
+  showAIQADialog = () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Ask AI About Your Bookmarks';
+    dialogContent.appendChild(title);
+
+    const info = document.createElement('p');
+    info.style.cssText = 'color: var(--disabled-color); font-size: 13px; margin-bottom: 16px;';
+    info.textContent = 'Ask questions about your bookmarks. The AI will search through your bookmarks to find relevant answers.';
+    dialogContent.appendChild(info);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'e.g., Find tweets about React hooks';
+    input.style.cssText = `
+      width: 100%; padding: 12px; margin-bottom: 16px;
+      border: 1px solid var(--border-color); border-radius: 8px;
+      background: var(--bg-color); color: var(--text-color); font-size: 14px;
+    `;
+    dialogContent.appendChild(input);
+
+    const answerDiv = document.createElement('div');
+    answerDiv.id = 'ai-answer';
+    answerDiv.style.cssText = `
+      min-height: 100px; padding: 16px; margin-bottom: 16px;
+      background: var(--hover-color); border-radius: 8px;
+      border: 1px solid var(--border-color); color: var(--text-color);
+      display: none;
+    `;
+    dialogContent.appendChild(answerDiv);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display: flex; gap: 8px;';
+
+    const askBtn = document.createElement('button');
+    askBtn.textContent = 'Ask';
+    askBtn.style.cssText = 'flex: 1; padding: 12px; border: none; background: var(--primary-color); color: white; border-radius: 4px; cursor: pointer;';
+    askBtn.addEventListener('click', () => {
+      const question = input.value.trim();
+      if (!question) return;
+
+      answerDiv.style.display = 'block';
+      answerDiv.textContent = 'Searching bookmarks...';
+
+      // Simple keyword matching Q&A
+      setTimeout(() => {
+        const keywords = question.toLowerCase().split(' ').filter(w => w.length > 3);
+        const results = (this.state.lastExtraction || []).filter(b => {
+          const text = b.text?.toLowerCase() || '';
+          return keywords.some(keyword => text.includes(keyword));
+        });
+
+        if (results.length === 0) {
+          answerDiv.textContent = 'No relevant bookmarks found for your question.';
+        } else {
+          answerDiv.innerHTML = `
+            <strong style="color: var(--text-color);">Found ${results.length} relevant bookmarks:</strong><br><br>
+            ${results.slice(0, 5).map((b, i) => `
+              <div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+                <strong style="color: var(--text-color);">@${b.username}</strong>: ${b.text?.substring(0, 150)}...
+                <br><a href="${b.url}" target="_blank" style="color: var(--primary-color); font-size: 12px;">View tweet</a>
+              </div>
+            `).join('')}
+          `;
+        }
+      }, 500);
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'padding: 12px 20px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+
+    buttonContainer.appendChild(askBtn);
+    buttonContainer.appendChild(closeBtn);
+    dialogContent.appendChild(buttonContainer);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    input.focus();
+  };
+
+  // FEATURE: Find Similar Bookmarks
+  findSimilarBookmarks = (bookmarkUrl) => {
+    const targetBookmark = this.state.lastExtraction?.find(b => b.url === bookmarkUrl);
+    if (!targetBookmark) return [];
+
+    const targetWords = new Set(
+      (targetBookmark.text || '').toLowerCase()
+        .split(/\s+/)
+        .filter(w => w.length > 4)
+    );
+
+    const similarities = (this.state.lastExtraction || [])
+      .filter(b => b.url !== bookmarkUrl)
+      .map(bookmark => {
+        const words = (bookmark.text || '').toLowerCase().split(/\s+/).filter(w => w.length > 4);
+        const commonWords = words.filter(w => targetWords.has(w)).length;
+        const similarity = commonWords / Math.max(targetWords.size, words.length);
+        return { bookmark, similarity };
+      })
+      .filter(item => item.similarity > 0.1)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 10);
+
+    return similarities;
+  };
+
+  showSimilarBookmarksDialog = (bookmark) => {
+    const similar = this.findSimilarBookmarks(bookmark.url);
+
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Similar Bookmarks';
+    dialogContent.appendChild(title);
+
+    const info = document.createElement('p');
+    info.style.cssText = 'color: var(--disabled-color); font-size: 13px; margin-bottom: 16px;';
+    info.textContent = `Finding bookmarks similar to: ${bookmark.text?.substring(0, 60)}...`;
+    dialogContent.appendChild(info);
+
+    if (similar.length === 0) {
+      const emptyMsg = document.createElement('p');
+      emptyMsg.style.cssText = 'color: var(--disabled-color); text-align: center; padding: 20px;';
+      emptyMsg.textContent = 'No similar bookmarks found';
+      dialogContent.appendChild(emptyMsg);
+    } else {
+      similar.forEach(({ bookmark: b, similarity }) => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+          padding: 12px; margin-bottom: 12px; background: var(--hover-color);
+          border-radius: 6px; border-left: 4px solid var(--primary-color);
+        `;
+
+        const author = document.createElement('div');
+        author.style.cssText = 'color: var(--text-color); font-weight: 600; margin-bottom: 4px;';
+        author.textContent = `@${b.username} (${Math.round(similarity * 100)}% similar)`;
+
+        const text = document.createElement('div');
+        text.style.cssText = 'color: var(--text-color); font-size: 13px; margin-bottom: 8px;';
+        text.textContent = b.text?.substring(0, 150) + '...';
+
+        const link = document.createElement('a');
+        link.href = b.url;
+        link.target = '_blank';
+        link.style.cssText = 'color: var(--primary-color); font-size: 12px; text-decoration: none;';
+        link.textContent = 'View tweet →';
+
+        item.appendChild(author);
+        item.appendChild(text);
+        item.appendChild(link);
+        dialogContent.appendChild(item);
+      });
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'width: 100%; padding: 12px; margin-top: 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+    dialogContent.appendChild(closeBtn);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+  };
+
+  // FEATURE: Reminder System
+  setReminder = async (bookmarkUrl, reminderDate, message = '') => {
+    const reminder = {
+      id: Date.now().toString(),
+      bookmarkUrl,
+      reminderDate: reminderDate.toISOString(),
+      message,
+      created: new Date().toISOString()
+    };
+
+    this.state.reminders.push(reminder);
+    await this.saveSettings();
+    return reminder;
+  };
+
+  checkReminders = () => {
+    const now = new Date();
+    const dueReminders = this.state.reminders.filter(r => {
+      return new Date(r.reminderDate) <= now;
+    });
+
+    if (dueReminders.length > 0) {
+      dueReminders.forEach(reminder => {
+        const bookmark = this.state.lastExtraction?.find(b => b.url === reminder.bookmarkUrl);
+        if (bookmark) {
+          this.updateStatus(`Reminder: ${reminder.message || bookmark.text?.substring(0, 50)}`);
+        }
+      });
+
+      // Remove due reminders
+      this.state.reminders = this.state.reminders.filter(r => {
+        return new Date(r.reminderDate) > now;
+      });
+      this.saveSettings();
+    }
+  };
+
+  // ====== END NEW FEATURES v0.10.0 ======
 }
 
 // LLM Provider Base Class

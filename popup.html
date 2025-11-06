@@ -50,6 +50,13 @@
         <button id="metricsBtn" class="action-button">Metrics</button>
       </div>
 
+      <!-- NEW v0.10.0: Additional Tools -->
+      <div class="tools-group">
+        <button id="viewModeBtn" class="action-button">Toggle View Mode</button>
+        <button id="collectionsBtn" class="action-button">Collections</button>
+        <button id="savedSearchesBtn" class="action-button">Saved Searches</button>
+      </div>
+
       <!-- Export Options -->
       <div class="export-group">
         <button id="exportMdBtn" class="export-button" disabled>Download .md</button>
@@ -57,6 +64,18 @@
         <button id="exportJsonBtn" class="export-button" disabled>Download .json</button>
         <button id="exportHtmlBtn" class="export-button" disabled>Download .html</button>
         <button id="copyClipboardBtn" class="export-button" disabled>Copy to Clipboard</button>
+      </div>
+
+      <!-- NEW v0.10.0: Advanced Export Options -->
+      <div class="export-group">
+        <button id="exportNotionBtn" class="export-button" disabled>Notion Export</button>
+        <button id="exportObsidianBtn" class="export-button" disabled>Obsidian Export</button>
+      </div>
+
+      <!-- NEW v0.10.0: Advanced Analysis -->
+      <div class="analysis-group">
+        <button id="sentimentBtn" class="action-button">Sentiment Analysis</button>
+        <button id="aiQABtn" class="action-button">AI Q&A</button>
       </div>
 
       <!-- Settings -->
@@ -70,7 +89,7 @@
       </div>
     </main>
     <footer class="footer">
-      <span id="version" class="version-text">v0.9.0 Beta</span>
+      <span id="version" class="version-text">v0.10.0 Beta</span>
       <button class="icon-btn icon-cog" id="settingsBtn" aria-label="Settings"></button>
     </footer>
   </div>

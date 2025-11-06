@@ -476,6 +476,13 @@ button:focus, input:focus, textarea:focus {
   margin: 16px 0;
 }
 
+.analysis-group {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
 .ai-button {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -549,6 +556,13 @@ button:focus, input:focus, textarea:focus {
 
 .action-group {
   margin: 16px 0;
+}
+
+.tools-group {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+  flex-wrap: wrap;
 }
 
 .settings-group {
