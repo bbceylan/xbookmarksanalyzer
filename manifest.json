@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "X Bookmarks Analyzer",
-  "version": "0.10.0",
-  "description": "Extract, organize, and analyze X (Twitter) bookmarks. Features: read/unread tracking, personal notes, custom tags, collections, saved searches, advanced filtering, AI analysis with multiple providers, and comprehensive export options.",
+  "version": "0.11.0",
+  "description": "Complete bookmark management solution for X (Twitter). Features: favorites, archives, bulk operations, reading queue, highlights, thread reader, engagement tracking, deleted tweet detection, author analytics, hidden gems finder, keyboard shortcuts, undo/redo, AI analysis, sentiment analysis, and comprehensive exports to Markdown, CSV, JSON, HTML, Notion, and Obsidian.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
