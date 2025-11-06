@@ -119,7 +119,11 @@ class PopupController {
       hiddenGemsBtn: document.getElementById('hiddenGemsBtn'),
       readingQueueBtn: document.getElementById('readingQueueBtn'),
       trackEngagementBtn: document.getElementById('trackEngagementBtn'),
-      archiveDeletedBtn: document.getElementById('archiveDeletedBtn')
+      archiveDeletedBtn: document.getElementById('archiveDeletedBtn'),
+      // NEW v0.12.0
+      authorsTabBtn: document.getElementById('authorsTabBtn'),
+      mediaGalleryBtn: document.getElementById('mediaGalleryBtn'),
+      articleSummaryBtn: document.getElementById('articleSummaryBtn')
     };
   };
 
@@ -281,6 +285,10 @@ class PopupController {
     this.elements.readingQueueBtn?.addEventListener('click', () => this.showReadingQueue());
     this.elements.trackEngagementBtn?.addEventListener('click', () => this.trackAllEngagements());
     this.elements.archiveDeletedBtn?.addEventListener('click', () => this.archiveDeletedTweets());
+    // NEW v0.12.0
+    this.elements.authorsTabBtn?.addEventListener('click', () => this.showAuthorsDashboard());
+    this.elements.mediaGalleryBtn?.addEventListener('click', () => this.showMediaGallery());
+    this.elements.articleSummaryBtn?.addEventListener('click', () => this.showArticleSummaryDialog());
 
     // Listen for messages from content script
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -3812,6 +3820,1108 @@ class LLMFreeProvider extends LLMProvider {
 
     return categories.slice(0, 5);
   }
+
+  // ============================================
+  // NEW v0.12.0: ENHANCED AUTHORS DASHBOARD
+  // ============================================
+
+  getAuthorsDashboardData = () => {
+    const authorStats = {};
+
+    // Get all bookmarks (native + manual)
+    const allBookmarks = this.state.lastExtraction || [];
+
+    allBookmarks.forEach(bookmark => {
+      const username = bookmark.username || 'unknown';
+      if (!authorStats[username]) {
+        authorStats[username] = {
+          count: 0,
+          totalLikes: 0,
+          totalRetweets: 0,
+          totalReplies: 0,
+          totalViews: 0,
+          displayName: bookmark.displayName || username,
+          bookmarks: [],
+          topics: new Map()
+        };
+      }
+
+      authorStats[username].count++;
+      authorStats[username].totalLikes += parseInt(bookmark.likes || 0);
+      authorStats[username].totalRetweets += parseInt(bookmark.retweets || 0);
+      authorStats[username].totalReplies += parseInt(bookmark.replies || 0);
+      authorStats[username].totalViews += parseInt(bookmark.views || 0);
+      authorStats[username].bookmarks.push(bookmark);
+
+      // Extract topics from tweet text
+      const topics = this.extractTopicsFromText(bookmark.text);
+      topics.forEach(topic => {
+        const current = authorStats[username].topics.get(topic) || 0;
+        authorStats[username].topics.set(topic, current + 1);
+      });
+    });
+
+    return Object.entries(authorStats)
+      .map(([username, stats]) => ({
+        username,
+        ...stats,
+        avgLikes: Math.round(stats.totalLikes / stats.count),
+        avgRetweets: Math.round(stats.totalRetweets / stats.count),
+        avgReplies: Math.round(stats.totalReplies / stats.count),
+        avgViews: Math.round(stats.totalViews / stats.count),
+        topTopics: Array.from(stats.topics.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([topic]) => topic)
+      }))
+      .sort((a, b) => b.count - a.count);
+  };
+
+  extractTopicsFromText = (text) => {
+    if (!text) return [];
+
+    const words = text.toLowerCase()
+      .replace(/[^\w\s#]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 3 && !this.isStopWord(word));
+
+    // Get hashtags
+    const hashtags = text.match(/#\w+/g) || [];
+    const hashtagWords = hashtags.map(tag => tag.substring(1).toLowerCase());
+
+    // Combine and count
+    const wordCounts = {};
+    [...words, ...hashtagWords].forEach(word => {
+      wordCounts[word] = (wordCounts[word] || 0) + 1;
+    });
+
+    // Return top words
+    return Object.entries(wordCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([word]) => word);
+  };
+
+  showAuthorsDashboard = async () => {
+    // Load manual bookmarks and combine with existing
+    const storage = await chrome.storage.local.get('manualBookmarks');
+    const manualBookmarks = storage.manualBookmarks || [];
+
+    // Temporarily combine bookmarks for analysis
+    const originalExtraction = this.state.lastExtraction;
+    this.state.lastExtraction = [
+      ...(originalExtraction || []),
+      ...manualBookmarks
+    ];
+
+    const authors = this.getAuthorsDashboardData();
+
+    // Restore original state
+    this.state.lastExtraction = originalExtraction;
+
+    if (authors.length === 0) {
+      this.updateStatus('No bookmarks found. Extract bookmarks first.');
+      return;
+    }
+
+    // Create dialog
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.8); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 12px;
+      max-width: 800px; width: 95%; max-height: 85vh; overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'margin-bottom: 20px; border-bottom: 2px solid var(--border-color); padding-bottom: 16px;';
+    header.innerHTML = `
+      <h2 style="margin: 0 0 8px 0; color: var(--text-color); font-size: 24px;">
+        👥 Authors Dashboard
+      </h2>
+      <p style="margin: 0; color: var(--disabled-color); font-size: 14px;">
+        Discover who you bookmark most and what topics they cover
+      </p>
+    `;
+    dialogContent.appendChild(header);
+
+    // Sort controls
+    const sortControls = document.createElement('div');
+    sortControls.style.cssText = 'margin-bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap;';
+    sortControls.innerHTML = `
+      <button class="author-sort-btn" data-sort="count" style="padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600;">
+        Most Bookmarks
+      </button>
+      <button class="author-sort-btn" data-sort="engagement" style="padding: 8px 16px; background: var(--hover-color); color: var(--text-color); border: none; border-radius: 20px; cursor: pointer; font-size: 13px;">
+        Highest Engagement
+      </button>
+      <button class="author-sort-btn" data-sort="recent" style="padding: 8px 16px; background: var(--hover-color); color: var(--text-color); border: none; border-radius: 20px; cursor: pointer; font-size: 13px;">
+        Most Recent
+      </button>
+    `;
+    dialogContent.appendChild(sortControls);
+
+    // Authors list container
+    const authorsContainer = document.createElement('div');
+    authorsContainer.id = 'authors-list-container';
+    dialogContent.appendChild(authorsContainer);
+
+    const renderAuthors = (sortBy = 'count') => {
+      let sortedAuthors = [...authors];
+
+      if (sortBy === 'engagement') {
+        sortedAuthors.sort((a, b) => (b.avgLikes + b.avgRetweets) - (a.avgLikes + a.avgRetweets));
+      } else if (sortBy === 'recent') {
+        sortedAuthors.sort((a, b) => {
+          const aLatest = Math.max(...a.bookmarks.map(bm => new Date(bm.dateTime || 0).getTime()));
+          const bLatest = Math.max(...b.bookmarks.map(bm => new Date(bm.dateTime || 0).getTime()));
+          return bLatest - aLatest;
+        });
+      }
+
+      authorsContainer.innerHTML = '';
+
+      sortedAuthors.forEach((author, index) => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+          padding: 16px; margin-bottom: 12px;
+          background: var(--hover-color);
+          border-radius: 8px;
+          border-left: 4px solid var(--primary-color);
+          transition: transform 0.2s;
+          cursor: pointer;
+        `;
+
+        item.addEventListener('mouseenter', () => {
+          item.style.transform = 'translateX(4px)';
+        });
+
+        item.addEventListener('mouseleave', () => {
+          item.style.transform = 'translateX(0)';
+        });
+
+        const headerRow = document.createElement('div');
+        headerRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
+
+        const nameSection = document.createElement('div');
+        nameSection.innerHTML = `
+          <div style="color: var(--text-color); font-weight: 700; font-size: 16px; margin-bottom: 4px;">
+            ${index + 1}. ${author.displayName}
+          </div>
+          <div style="color: var(--disabled-color); font-size: 13px;">
+            @${author.username}
+          </div>
+        `;
+
+        const countBadge = document.createElement('div');
+        countBadge.style.cssText = `
+          background: var(--primary-color);
+          color: white;
+          padding: 6px 12px;
+          border-radius: 20px;
+          font-weight: 700;
+          font-size: 14px;
+        `;
+        countBadge.textContent = `${author.count} bookmarks`;
+
+        headerRow.appendChild(nameSection);
+        headerRow.appendChild(countBadge);
+
+        const statsRow = document.createElement('div');
+        statsRow.style.cssText = 'display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px;';
+        statsRow.innerHTML = `
+          <div style="text-align: center; padding: 8px; background: var(--bg-color); border-radius: 6px;">
+            <div style="color: var(--disabled-color); font-size: 11px; margin-bottom: 4px;">AVG LIKES</div>
+            <div style="color: var(--text-color); font-weight: 600; font-size: 15px;">${author.avgLikes.toLocaleString()}</div>
+          </div>
+          <div style="text-align: center; padding: 8px; background: var(--bg-color); border-radius: 6px;">
+            <div style="color: var(--disabled-color); font-size: 11px; margin-bottom: 4px;">AVG RTs</div>
+            <div style="color: var(--text-color); font-weight: 600; font-size: 15px;">${author.avgRetweets.toLocaleString()}</div>
+          </div>
+          <div style="text-align: center; padding: 8px; background: var(--bg-color); border-radius: 6px;">
+            <div style="color: var(--disabled-color); font-size: 11px; margin-bottom: 4px;">AVG REPLIES</div>
+            <div style="color: var(--text-color); font-weight: 600; font-size: 15px;">${author.avgReplies.toLocaleString()}</div>
+          </div>
+          <div style="text-align: center; padding: 8px; background: var(--bg-color); border-radius: 6px;">
+            <div style="color: var(--disabled-color); font-size: 11px; margin-bottom: 4px;">AVG VIEWS</div>
+            <div style="color: var(--text-color); font-weight: 600; font-size: 15px;">${author.avgViews.toLocaleString()}</div>
+          </div>
+        `;
+
+        const topicsRow = document.createElement('div');
+        topicsRow.style.cssText = 'margin-top: 12px;';
+        topicsRow.innerHTML = `
+          <div style="color: var(--disabled-color); font-size: 11px; margin-bottom: 6px; font-weight: 600;">TOP TOPICS</div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            ${author.topTopics.map(topic => `
+              <span style="
+                background: var(--primary-color);
+                color: white;
+                padding: 4px 10px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 500;
+              ">${topic}</span>
+            `).join('')}
+          </div>
+        `;
+
+        item.appendChild(headerRow);
+        item.appendChild(statsRow);
+        item.appendChild(topicsRow);
+
+        // Click to filter by author
+        item.addEventListener('click', () => {
+          this.state.filterOptions.author = author.username;
+          this.applyFilters();
+          document.body.removeChild(dialog);
+          this.updateStatus(`Filtered by author: @${author.username}`);
+        });
+
+        authorsContainer.appendChild(item);
+      });
+    };
+
+    // Initial render
+    renderAuthors('count');
+
+    // Sort button handlers
+    sortControls.querySelectorAll('.author-sort-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        // Update button styles
+        sortControls.querySelectorAll('.author-sort-btn').forEach(b => {
+          b.style.background = 'var(--hover-color)';
+          b.style.color = 'var(--text-color)';
+        });
+        e.target.style.background = 'var(--primary-color)';
+        e.target.style.color = 'white';
+
+        // Re-render with new sort
+        renderAuthors(e.target.dataset.sort);
+      });
+    });
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = `
+      width: 100%; padding: 14px; margin-top: 20px;
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-color);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+    `;
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+    closeBtn.addEventListener('mouseenter', () => {
+      closeBtn.style.background = 'var(--hover-color)';
+    });
+    closeBtn.addEventListener('mouseleave', () => {
+      closeBtn.style.background = 'transparent';
+    });
+    dialogContent.appendChild(closeBtn);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+  };
+
+  // ============================================
+  // NEW v0.12.0: MEDIA GALLERY VIEW
+  // ============================================
+
+  extractMediaFromBookmarks = async () => {
+    const storage = await chrome.storage.local.get('manualBookmarks');
+    const manualBookmarks = storage.manualBookmarks || [];
+    const allBookmarks = [
+      ...(this.state.lastExtraction || []),
+      ...manualBookmarks
+    ];
+
+    const mediaBookmarks = [];
+
+    for (const bookmark of allBookmarks) {
+      const mediaUrls = this.extractMediaUrls(bookmark.text, bookmark.url);
+      if (mediaUrls.length > 0) {
+        mediaBookmarks.push({
+          ...bookmark,
+          mediaUrls,
+          mediaTypes: mediaUrls.map(url => this.getMediaType(url))
+        });
+      }
+    }
+
+    return mediaBookmarks;
+  };
+
+  extractMediaUrls = (text, tweetUrl) => {
+    const urls = [];
+
+    // Extract image URLs from text
+    const imgRegex = /https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp)/gi;
+    const imgMatches = text.match(imgRegex) || [];
+    urls.push(...imgMatches);
+
+    // Extract video URLs
+    const videoRegex = /https?:\/\/[^\s]+\.(mp4|webm|mov)/gi;
+    const videoMatches = text.match(videoRegex) || [];
+    urls.push(...videoMatches);
+
+    // Twitter media URLs (pbs.twimg.com)
+    const twitterMediaRegex = /https?:\/\/pbs\.twimg\.com\/media\/[^\s]+/gi;
+    const twitterMediaMatches = text.match(twitterMediaRegex) || [];
+    urls.push(...twitterMediaMatches);
+
+    // Add tweet URL as potential media source (X embeds images/videos)
+    if (tweetUrl && urls.length === 0) {
+      // Mark as tweet embed - we'll handle this specially
+      urls.push(tweetUrl + '#embed');
+    }
+
+    return [...new Set(urls)];
+  };
+
+  getMediaType = (url) => {
+    if (url.includes('#embed')) return 'tweet-embed';
+    if (url.match(/\.(mp4|webm|mov)$/i)) return 'video';
+    if (url.match(/\.(gif)$/i)) return 'gif';
+    return 'image';
+  };
+
+  showMediaGallery = async () => {
+    const mediaBookmarks = await this.extractMediaFromBookmarks();
+
+    if (mediaBookmarks.length === 0) {
+      this.updateStatus('No media found in bookmarks.');
+      return;
+    }
+
+    // Create dialog
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.95); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 12px;
+      max-width: 1200px; width: 95%; max-height: 90vh; overflow-y: auto;
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'margin-bottom: 20px; border-bottom: 2px solid var(--border-color); padding-bottom: 16px;';
+    header.innerHTML = `
+      <h2 style="margin: 0 0 8px 0; color: var(--text-color); font-size: 24px;">
+        🎨 Media Gallery
+      </h2>
+      <p style="margin: 0; color: var(--disabled-color); font-size: 14px;">
+        ${mediaBookmarks.length} bookmarks with media • Click any image to view full size
+      </p>
+    `;
+    dialogContent.appendChild(header);
+
+    // Filter controls
+    const filterControls = document.createElement('div');
+    filterControls.style.cssText = 'margin-bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap;';
+    filterControls.innerHTML = `
+      <button class="media-filter-btn" data-filter="all" style="padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600;">
+        All Media
+      </button>
+      <button class="media-filter-btn" data-filter="image" style="padding: 8px 16px; background: var(--hover-color); color: var(--text-color); border: none; border-radius: 20px; cursor: pointer; font-size: 13px;">
+        Images Only
+      </button>
+      <button class="media-filter-btn" data-filter="video" style="padding: 8px 16px; background: var(--hover-color); color: var(--text-color); border: none; border-radius: 20px; cursor: pointer; font-size: 13px;">
+        Videos Only
+      </button>
+      <button class="media-filter-btn" data-filter="gif" style="padding: 8px 16px; background: var(--hover-color); color: var(--text-color); border: none; border-radius: 20px; cursor: pointer; font-size: 13px;">
+        GIFs Only
+      </button>
+    `;
+    dialogContent.appendChild(filterControls);
+
+    // Gallery grid
+    const galleryGrid = document.createElement('div');
+    galleryGrid.id = 'media-gallery-grid';
+    galleryGrid.style.cssText = `
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    `;
+    dialogContent.appendChild(galleryGrid);
+
+    const renderGallery = (filter = 'all') => {
+      galleryGrid.innerHTML = '';
+
+      const filteredBookmarks = filter === 'all'
+        ? mediaBookmarks
+        : mediaBookmarks.filter(bm => bm.mediaTypes.includes(filter));
+
+      filteredBookmarks.forEach(bookmark => {
+        bookmark.mediaUrls.forEach((mediaUrl, idx) => {
+          const mediaType = bookmark.mediaTypes[idx];
+
+          // Skip if filtering
+          if (filter !== 'all' && mediaType !== filter) return;
+
+          const card = document.createElement('div');
+          card.style.cssText = `
+            position: relative;
+            background: var(--hover-color);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+            aspect-ratio: 1;
+          `;
+
+          card.addEventListener('mouseenter', () => {
+            card.style.transform = 'scale(1.05)';
+          });
+
+          card.addEventListener('mouseleave', () => {
+            card.style.transform = 'scale(1)';
+          });
+
+          // Media content
+          if (mediaType === 'tweet-embed') {
+            card.innerHTML = `
+              <div style="
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: linear-gradient(135deg, var(--primary-color), #1a8cd8);
+                color: white;
+                font-size: 48px;
+              ">
+                🐦
+              </div>
+            `;
+          } else if (mediaType === 'video' || mediaType === 'gif') {
+            card.innerHTML = `
+              <div style="
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--bg-color);
+                color: var(--text-color);
+                font-size: 48px;
+              ">
+                ${mediaType === 'video' ? '🎥' : '🎬'}
+              </div>
+            `;
+          } else {
+            card.innerHTML = `
+              <img src="${mediaUrl}" alt="Media" style="
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              " onerror="this.parentElement.innerHTML = '<div style=\\"display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-color);\\">❌</div>'">
+            `;
+          }
+
+          // Overlay with author info
+          const overlay = document.createElement('div');
+          overlay.style.cssText = `
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+            padding: 12px;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.2s;
+          `;
+          overlay.innerHTML = `
+            <div style="font-size: 12px; font-weight: 600;">@${bookmark.username}</div>
+            <div style="font-size: 11px; opacity: 0.8; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${bookmark.text.substring(0, 50)}...
+            </div>
+          `;
+
+          card.addEventListener('mouseenter', () => {
+            overlay.style.opacity = '1';
+          });
+
+          card.addEventListener('mouseleave', () => {
+            overlay.style.opacity = '0';
+          });
+
+          card.appendChild(overlay);
+
+          // Click to open lightbox
+          card.addEventListener('click', () => {
+            this.showMediaLightbox(mediaUrl, mediaType, bookmark);
+          });
+
+          galleryGrid.appendChild(card);
+        });
+      });
+
+      if (filteredBookmarks.length === 0) {
+        galleryGrid.innerHTML = `
+          <div style="
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 40px;
+            color: var(--disabled-color);
+            font-size: 16px;
+          ">
+            No ${filter === 'all' ? '' : filter + ' '}media found
+          </div>
+        `;
+      }
+    };
+
+    // Initial render
+    renderGallery('all');
+
+    // Filter button handlers
+    filterControls.querySelectorAll('.media-filter-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        // Update button styles
+        filterControls.querySelectorAll('.media-filter-btn').forEach(b => {
+          b.style.background = 'var(--hover-color)';
+          b.style.color = 'var(--text-color)';
+        });
+        e.target.style.background = 'var(--primary-color)';
+        e.target.style.color = 'white';
+
+        // Re-render with filter
+        renderGallery(e.target.dataset.filter);
+      });
+    });
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = `
+      width: 100%; padding: 14px; margin-top: 20px;
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-color);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+    `;
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+    closeBtn.addEventListener('mouseenter', () => {
+      closeBtn.style.background = 'var(--hover-color)';
+    });
+    closeBtn.addEventListener('mouseleave', () => {
+      closeBtn.style.background = 'transparent';
+    });
+    dialogContent.appendChild(closeBtn);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+  };
+
+  showMediaLightbox = (mediaUrl, mediaType, bookmark) => {
+    const lightbox = document.createElement('div');
+    lightbox.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      padding: 40px;
+    `;
+
+    const content = document.createElement('div');
+    content.style.cssText = `
+      max-width: 90%;
+      max-height: 90%;
+      position: relative;
+    `;
+
+    if (mediaType === 'tweet-embed') {
+      content.innerHTML = `
+        <div style="background: white; padding: 40px; border-radius: 12px; text-align: center;">
+          <p style="margin-bottom: 20px; color: #333;">Open tweet to view embedded media</p>
+          <a href="${mediaUrl.replace('#embed', '')}" target="_blank" style="
+            display: inline-block;
+            padding: 12px 24px;
+            background: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            border-radius: 20px;
+            font-weight: 600;
+          ">View Tweet on X</a>
+        </div>
+      `;
+    } else if (mediaType === 'video') {
+      content.innerHTML = `
+        <video src="${mediaUrl}" controls autoplay style="max-width: 100%; max-height: 80vh; border-radius: 8px;">
+        </video>
+      `;
+    } else {
+      content.innerHTML = `
+        <img src="${mediaUrl}" alt="Media" style="max-width: 100%; max-height: 80vh; border-radius: 8px;">
+      `;
+    }
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = `
+      position: absolute;
+      top: -40px;
+      right: 0;
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 20px;
+      font-weight: bold;
+    `;
+    closeBtn.addEventListener('click', () => document.body.removeChild(lightbox));
+    content.appendChild(closeBtn);
+
+    // Author info
+    const info = document.createElement('div');
+    info.style.cssText = `
+      margin-top: 16px;
+      color: white;
+      text-align: center;
+    `;
+    info.innerHTML = `
+      <div style="font-weight: 600; margin-bottom: 4px;">@${bookmark.username}</div>
+      <div style="font-size: 14px; opacity: 0.8;">${bookmark.text.substring(0, 150)}${bookmark.text.length > 150 ? '...' : ''}</div>
+      <a href="${bookmark.url}" target="_blank" style="
+        display: inline-block;
+        margin-top: 12px;
+        padding: 8px 16px;
+        background: var(--primary-color);
+        color: white;
+        text-decoration: none;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+      ">View Tweet</a>
+    `;
+    content.appendChild(info);
+
+    lightbox.appendChild(content);
+
+    // Click backdrop to close
+    lightbox.addEventListener('click', (e) => {
+      if (e.target === lightbox) {
+        document.body.removeChild(lightbox);
+      }
+    });
+
+    document.body.appendChild(lightbox);
+  };
+
+  // ============================================
+  // NEW v0.12.0: ARTICLE SUMMARIZATION
+  // ============================================
+
+  showArticleSummaryDialog = async () => {
+    // Check if LLM provider is configured
+    if (this.state.llmProvider === 'none') {
+      this.updateStatus('Please configure an LLM provider in settings first.');
+      this.showSettingsDialog();
+      return;
+    }
+
+    const storage = await chrome.storage.local.get(['manualBookmarks', 'articleSummaries']);
+    const manualBookmarks = storage.manualBookmarks || [];
+    const cachedSummaries = storage.articleSummaries || {};
+
+    const allBookmarks = [
+      ...(this.state.lastExtraction || []),
+      ...manualBookmarks
+    ];
+
+    // Find bookmarks with article links
+    const bookmarksWithLinks = allBookmarks.filter(bm => {
+      const urls = this.extractArticleUrls(bm.text);
+      return urls.length > 0;
+    });
+
+    if (bookmarksWithLinks.length === 0) {
+      this.updateStatus('No bookmarks with article links found.');
+      return;
+    }
+
+    // Create dialog
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.8); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 12px;
+      max-width: 900px; width: 95%; max-height: 85vh; overflow-y: auto;
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'margin-bottom: 20px; border-bottom: 2px solid var(--border-color); padding-bottom: 16px;';
+    header.innerHTML = `
+      <h2 style="margin: 0 0 8px 0; color: var(--text-color); font-size: 24px;">
+        📰 Article Summaries
+      </h2>
+      <p style="margin: 0; color: var(--disabled-color); font-size: 14px;">
+        ${bookmarksWithLinks.length} bookmarks with article links • Click "Summarize" to generate AI summary
+      </p>
+    `;
+    dialogContent.appendChild(header);
+
+    // Articles list
+    const articlesList = document.createElement('div');
+    articlesList.id = 'articles-list';
+    articlesList.style.cssText = 'margin-bottom: 20px;';
+
+    bookmarksWithLinks.slice(0, 20).forEach((bookmark, index) => {
+      const urls = this.extractArticleUrls(bookmark.text);
+      const articleUrl = urls[0];
+
+      const card = document.createElement('div');
+      card.style.cssText = `
+        padding: 16px;
+        margin-bottom: 12px;
+        background: var(--hover-color);
+        border-radius: 8px;
+        border-left: 4px solid var(--primary-color);
+      `;
+
+      const cardHeader = document.createElement('div');
+      cardHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;';
+
+      const tweetInfo = document.createElement('div');
+      tweetInfo.style.cssText = 'flex: 1; margin-right: 12px;';
+      tweetInfo.innerHTML = `
+        <div style="color: var(--text-color); font-weight: 600; margin-bottom: 4px;">
+          @${bookmark.username}
+        </div>
+        <div style="color: var(--disabled-color); font-size: 13px; margin-bottom: 8px;">
+          ${bookmark.text.substring(0, 100)}${bookmark.text.length > 100 ? '...' : ''}
+        </div>
+        <a href="${articleUrl}" target="_blank" style="
+          color: var(--primary-color);
+          font-size: 12px;
+          text-decoration: none;
+          word-break: break-all;
+        ">${articleUrl.substring(0, 60)}${articleUrl.length > 60 ? '...' : ''}</a>
+      `;
+
+      const actionBtn = document.createElement('button');
+      actionBtn.className = `summarize-btn-${index}`;
+      actionBtn.style.cssText = `
+        padding: 8px 16px;
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+      `;
+
+      // Check if we have a cached summary
+      const cacheKey = this.getArticleCacheKey(articleUrl);
+      if (cachedSummaries[cacheKey]) {
+        actionBtn.textContent = 'View Summary';
+        actionBtn.style.background = 'var(--success-color, #00BA7C)';
+      } else {
+        actionBtn.textContent = 'Summarize';
+      }
+
+      cardHeader.appendChild(tweetInfo);
+      cardHeader.appendChild(actionBtn);
+      card.appendChild(cardHeader);
+
+      // Summary container (initially hidden)
+      const summaryContainer = document.createElement('div');
+      summaryContainer.style.cssText = 'display: none; margin-top: 12px; padding: 12px; background: var(--bg-color); border-radius: 6px;';
+      summaryContainer.id = `summary-${index}`;
+      card.appendChild(summaryContainer);
+
+      actionBtn.addEventListener('click', async () => {
+        if (cachedSummaries[cacheKey]) {
+          // Show cached summary
+          this.displaySummary(summaryContainer, cachedSummaries[cacheKey]);
+          summaryContainer.style.display = 'block';
+          actionBtn.textContent = 'Hide Summary';
+          actionBtn.addEventListener('click', () => {
+            if (summaryContainer.style.display === 'none') {
+              summaryContainer.style.display = 'block';
+              actionBtn.textContent = 'Hide Summary';
+            } else {
+              summaryContainer.style.display = 'none';
+              actionBtn.textContent = 'View Summary';
+            }
+          }, { once: true });
+        } else {
+          // Generate new summary
+          actionBtn.textContent = 'Summarizing...';
+          actionBtn.disabled = true;
+          actionBtn.style.opacity = '0.6';
+
+          try {
+            const summary = await this.summarizeArticle(articleUrl);
+
+            // Cache the summary
+            cachedSummaries[cacheKey] = summary;
+            await chrome.storage.local.set({ articleSummaries: cachedSummaries });
+
+            // Display summary
+            this.displaySummary(summaryContainer, summary);
+            summaryContainer.style.display = 'block';
+            actionBtn.textContent = 'Hide Summary';
+            actionBtn.disabled = false;
+            actionBtn.style.opacity = '1';
+            actionBtn.style.background = 'var(--success-color, #00BA7C)';
+          } catch (error) {
+            summaryContainer.innerHTML = `
+              <div style="color: var(--danger-color, #F4212E); font-size: 14px;">
+                ❌ Error: ${error.message}
+              </div>
+            `;
+            summaryContainer.style.display = 'block';
+            actionBtn.textContent = 'Retry';
+            actionBtn.disabled = false;
+            actionBtn.style.opacity = '1';
+          }
+        }
+      });
+
+      articlesList.appendChild(card);
+    });
+
+    dialogContent.appendChild(articlesList);
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = `
+      width: 100%; padding: 14px;
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-color);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+    `;
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+    dialogContent.appendChild(closeBtn);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+  };
+
+  extractArticleUrls = (text) => {
+    // Extract URLs from tweet text
+    const urlRegex = /https?:\/\/[^\s]+/g;
+    const urls = text.match(urlRegex) || [];
+
+    // Filter out Twitter/X URLs and media URLs
+    return urls.filter(url => {
+      const lowerUrl = url.toLowerCase();
+      return !lowerUrl.includes('twitter.com') &&
+             !lowerUrl.includes('x.com') &&
+             !lowerUrl.includes('pbs.twimg.com') &&
+             !lowerUrl.match(/\.(jpg|jpeg|png|gif|webp|mp4|webm|mov)$/i);
+    });
+  };
+
+  getArticleCacheKey = (url) => {
+    // Create a simple hash of the URL for caching
+    return btoa(url).substring(0, 50);
+  };
+
+  summarizeArticle = async (articleUrl) => {
+    // Step 1: Fetch article content using Jina Reader API
+    this.updateStatus('Fetching article content...');
+
+    const jinaUrl = `https://r.jina.ai/${articleUrl}`;
+    const jinaResponse = await fetch(jinaUrl, {
+      headers: {
+        'Accept': 'application/json',
+        'X-Return-Format': 'markdown'
+      }
+    });
+
+    if (!jinaResponse.ok) {
+      throw new Error('Failed to fetch article content');
+    }
+
+    const jinaData = await jinaResponse.json();
+    const articleText = jinaData.data?.content || jinaData.content || '';
+
+    if (!articleText || articleText.length < 100) {
+      throw new Error('Article content too short or empty');
+    }
+
+    // Limit article text to first 4000 characters for API efficiency
+    const truncatedText = articleText.substring(0, 4000);
+
+    // Step 2: Summarize using configured LLM provider
+    this.updateStatus('Generating summary with AI...');
+
+    const prompt = `Please provide a concise summary of the following article in 3-5 bullet points. Focus on the key takeaways and main arguments.
+
+Article:
+${truncatedText}
+
+Summary (3-5 bullet points):`;
+
+    let summary;
+
+    if (this.state.llmProvider === 'openai') {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.state.apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            { role: 'system', content: 'You are a helpful assistant that summarizes articles concisely.' },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: 300,
+          temperature: 0.5
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('OpenAI API request failed');
+      }
+
+      const data = await response.json();
+      summary = data.choices[0].message.content;
+
+    } else if (this.state.llmProvider === 'anthropic') {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.state.apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 300,
+          messages: [
+            { role: 'user', content: prompt }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Anthropic API request failed');
+      }
+
+      const data = await response.json();
+      summary = data.content[0].text;
+
+    } else {
+      // Fallback: extract key sentences
+      summary = this.extractKeySentences(truncatedText, 5);
+    }
+
+    this.updateStatus('Summary generated successfully!');
+
+    return {
+      summary,
+      url: articleUrl,
+      timestamp: Date.now(),
+      provider: this.state.llmProvider
+    };
+  };
+
+  extractKeySentences = (text, count = 5) => {
+    // Simple extractive summarization
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
+
+    // Score sentences by length and position
+    const scoredSentences = sentences.map((sentence, index) => ({
+      text: sentence.trim(),
+      score: sentence.length + (index < 5 ? 50 : 0) // Boost early sentences
+    }));
+
+    // Get top sentences
+    const topSentences = scoredSentences
+      .sort((a, b) => b.score - a.score)
+      .slice(0, count)
+      .map(s => '• ' + s.text);
+
+    return topSentences.join('\n');
+  };
+
+  displaySummary = (container, summaryData) => {
+    const timeAgo = this.getTimeAgo(summaryData.timestamp);
+
+    container.innerHTML = `
+      <div style="margin-bottom: 8px; color: var(--disabled-color); font-size: 12px;">
+        Generated ${timeAgo} • Provider: ${summaryData.provider || 'local'}
+      </div>
+      <div style="color: var(--text-color); font-size: 14px; line-height: 1.6; white-space: pre-wrap;">
+        ${summaryData.summary}
+      </div>
+      <a href="${summaryData.url}" target="_blank" style="
+        display: inline-block;
+        margin-top: 12px;
+        padding: 6px 12px;
+        background: var(--primary-color);
+        color: white;
+        text-decoration: none;
+        border-radius: 16px;
+        font-size: 12px;
+        font-weight: 600;
+      ">Read Full Article →</a>
+    `;
+  };
+
+  getTimeAgo = (timestamp) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    return `${Math.floor(seconds / 86400)} days ago`;
+  };
 }
 
 // Initialize the popup controller when the DOM is loaded

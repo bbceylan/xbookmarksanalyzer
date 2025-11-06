@@ -1,12 +1,71 @@
 # X Bookmarks Analyzer - Browser Extension
 
-![Version](https://img.shields.io/badge/version-0.9.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
+![Version](https://img.shields.io/badge/version-0.12.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
 
-Extract, analyze, sort and manage your X (Twitter) bookmarks with powerful features. Multiple LLM providers, duplicate detection, engagement sorting, beautiful HTML export, and performance optimizations.
+Extract, analyze, sort and manage your X (Twitter) bookmarks with powerful features. Proactive bookmark capture, author-centric analytics, media gallery, AI article summarization, multiple LLM providers, and comprehensive export options.
 
 ## 📋 Changelog
 
-### Version 0.9.0 (Beta) - Current - November 2025
+### Version 0.12.0 (Beta) - Current - November 2025
+#### 🚀 Major New Features
+- **➕ Proactive "Add to Analyzer" Workflow**
+  - Custom button injected directly onto X.com's UI on every tweet
+  - Save and tag tweets instantly without using X's native bookmark button
+  - Quick tagging dialog with custom tags and notes
+  - Separate storage for manual bookmarks vs. native bookmarks
+  - Toast notifications for successful saves
+  - Visual feedback with animated button states
+
+- **👥 Author-Centric Analysis Dashboard**
+  - New "Authors Dashboard" tab aggregating bookmarks by user
+  - Shows who you bookmark most with engagement metrics
+  - Topic analysis: discover what themes each author covers
+  - Interactive sorting: by bookmark count, engagement, or recency
+  - Average engagement stats per author (likes, retweets, replies, views)
+  - Click any author to filter bookmarks instantly
+  - Top 5 topics displayed as tags for each author
+
+- **🎨 Media Gallery View**
+  - Pinterest-style grid layout for all media bookmarks
+  - Filters for images, videos, and GIFs
+  - Lightbox viewer for full-size media viewing
+  - Hover overlays showing author and tweet preview
+  - Automatic media detection from tweet content
+  - Support for Twitter media URLs (pbs.twimg.com)
+  - Tweet embed links for tweets with embedded media
+
+- **📰 Article & Link Content Analysis**
+  - "Summarize Articles" button for AI-powered article summaries
+  - Automatic article URL extraction from tweets
+  - Integration with Jina Reader API for article content fetching
+  - LLM-powered summarization (OpenAI & Anthropic supported)
+  - Fallback extractive summarization for LLM-free mode
+  - Summary caching to avoid re-processing
+  - Shows article metadata and reading time
+  - Direct links to full articles
+
+#### 🎯 UI/UX Enhancements
+- New "Enhanced Views" section with dashboard buttons
+- Improved dialog layouts with better spacing
+- Interactive filter and sort controls
+- Better visual hierarchy with badges and cards
+- Responsive grid layouts for media gallery
+- Smooth transitions and hover effects
+
+#### 💾 Data Management
+- New storage keys: `manualBookmarks`, `articleSummaries`
+- Enhanced metadata tracking for manual saves
+- Article summary caching for faster access
+- Improved bookmark deduplication logic
+
+#### 🔧 Technical Improvements
+- MutationObserver for dynamic button injection
+- Debounced scroll detection for performance
+- CORS-friendly article fetching via Jina Reader
+- Better error handling with user-friendly messages
+- Modular code structure for new features
+
+### Version 0.9.0 (Beta) - November 2025
 #### 🚀 New Features
 - **📊 Engagement Metrics Sorting**: Sort bookmarks by likes, retweets, replies, views, date, or combined engagement score
 - **🔍 Duplicate Detection**: Automatically find and remove duplicate bookmarks with one click
