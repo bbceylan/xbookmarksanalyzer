@@ -1390,27 +1390,44 @@ class PopupController {
   };
 
   copyToClipboard = async () => {
+    console.log('[Clipboard] Copy button clicked');
+
     // Check if we have bookmarks to copy
     if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      console.warn('[Clipboard] No bookmarks in state');
       this.updateStatus('⚠️ No bookmarks to copy. Please scan bookmarks first.');
       return;
     }
 
+    console.log(`[Clipboard] State has ${this.state.lastExtraction.length} bookmarks`);
+
     const md = this.generateMarkdown();
     if (!md || md.trim() === '') {
+      console.error('[Clipboard] generateMarkdown returned empty string');
       this.updateStatus('⚠️ No content to copy. Please scan bookmarks first.');
       return;
     }
 
     const bookmarkCount = this.state.lastExtraction.length;
-    console.log(`[Clipboard] Attempting to copy ${bookmarkCount} bookmarks (${md.length} characters)`);
+    console.log(`[Clipboard] Generated markdown: ${md.length} characters`);
+    console.log(`[Clipboard] First 200 chars:`, md.substring(0, 200));
+    console.log(`[Clipboard] Attempting to copy ${bookmarkCount} bookmarks`);
 
     try {
       // Try modern Clipboard API first
       if (navigator.clipboard && navigator.clipboard.writeText) {
+        console.log('[Clipboard] Using Clipboard API');
         await navigator.clipboard.writeText(md);
-        this.updateStatus(`✓ Copied ${bookmarkCount} bookmark${bookmarkCount !== 1 ? 's' : ''} to clipboard!`);
-        console.log('[Clipboard] Successfully copied using Clipboard API');
+        this.updateStatus(`✓ Copied ${bookmarkCount} bookmark${bookmarkCount !== 1 ? 's' : ''} to clipboard! (${Math.round(md.length/1024)}KB)`);
+        console.log('[Clipboard] ✓ Successfully copied using Clipboard API');
+
+        // Verify it was actually copied
+        try {
+          const clipboardContent = await navigator.clipboard.readText();
+          console.log(`[Clipboard] Verified clipboard has ${clipboardContent.length} characters`);
+        } catch (readErr) {
+          console.warn('[Clipboard] Could not verify clipboard (permission denied):', readErr.message);
+        }
       } else {
         // Fallback to legacy method
         console.log('[Clipboard] Clipboard API not available, using fallback');
@@ -1418,6 +1435,8 @@ class PopupController {
       }
     } catch (err) {
       console.error('[Clipboard] Error copying to clipboard:', err);
+      console.error('[Clipboard] Error name:', err.name);
+      console.error('[Clipboard] Error message:', err.message);
       // Try fallback method
       this.fallbackCopyToClipboard(md);
     }
