@@ -568,19 +568,133 @@ class PopupController {
     chrome.tabs.query({active: true, currentWindow: true}, tabs => {
       const tabId = tabs[0].id;
 
-      // First, inject auto-scroll script
+      // Inject progressive scroll & scan script
       chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: async () => {
-          const scrollAndWait = async () => {
+          // Progressive scroll and scan function that extracts bookmarks as we scroll
+          const progressiveScanAndScroll = async () => {
+            const allBookmarks = new Map(); // Use Map to avoid duplicates by URL
             let lastHeight = 0;
             let scrollAttempts = 0;
-            const maxAttempts = 50; // Note: Using local constant as this runs in injected context
+            const maxAttempts = 50;
             const scrollDelay = 2000;
             const stableAttempts = 3;
-            const postScrollDelay = 1000;
 
+            // Helper function to extract bookmarks from current viewport
+            const extractCurrentBookmarks = () => {
+              const articles = document.querySelectorAll('article');
+              const bookmarks = [];
+
+              articles.forEach(article => {
+                try {
+                  // Extract URL first
+                  const link = article.querySelector('a[href*="/status/"]');
+                  const url = link ? link.href : '';
+                  if (!url) return;
+
+                  // Skip if already extracted
+                  if (allBookmarks.has(url)) return;
+
+                  // Extract text
+                  const textEls = article.querySelectorAll('[data-testid="tweetText"]');
+                  const textParts = [];
+                  textEls.forEach(el => {
+                    const text = el.textContent?.trim();
+                    if (text) textParts.push(text);
+                  });
+                  const text = textParts.join(' ');
+
+                  // Extract author info
+                  let displayName = '';
+                  let username = '';
+                  const header = article.querySelector('div[role="group"]')?.parentElement?.parentElement;
+                  if (header) {
+                    const spans = header.querySelectorAll('span');
+                    if (spans.length > 0) displayName = spans[0].textContent?.trim() || '';
+                    for (const span of spans) {
+                      const spanText = span.textContent?.trim();
+                      if (spanText && spanText.startsWith('@')) {
+                        username = spanText.replace('@', '');
+                        break;
+                      }
+                    }
+                  }
+
+                  // Fallback for username from URL
+                  if (!username && url) {
+                    const match = url.match(/(?:x\.com|twitter\.com)\/([^\/]+)\/status/);
+                    if (match) username = match[1];
+                  }
+
+                  // Extract timestamp
+                  const timeEl = article.querySelector('time');
+                  const dateTime = timeEl ? timeEl.getAttribute('datetime') || '' : '';
+
+                  // Extract engagement metrics
+                  const extractNumber = (text) => {
+                    if (!text) return '';
+                    const abbrevMatch = text.match(/([\d,.]+)\s*([KMBkmb])/);
+                    if (abbrevMatch) {
+                      const num = parseFloat(abbrevMatch[1].replace(/,/g, ''));
+                      const suffix = abbrevMatch[2].toUpperCase();
+                      const multipliers = { 'K': 1000, 'M': 1000000, 'B': 1000000000 };
+                      return Math.round(num * (multipliers[suffix] || 1)).toString();
+                    }
+                    const numberMatch = text.match(/([\d,.]+)/);
+                    return numberMatch ? numberMatch[1].replace(/,/g, '') : '';
+                  };
+
+                  const likeEl = article.querySelector('[data-testid="like"]');
+                  const likes = likeEl ? extractNumber(likeEl.textContent) : '';
+
+                  const retweetEl = article.querySelector('[data-testid="retweet"]');
+                  const retweets = retweetEl ? extractNumber(retweetEl.textContent) : '';
+
+                  const replyEl = article.querySelector('[data-testid="reply"]');
+                  const replies = replyEl ? extractNumber(replyEl.textContent) : '';
+
+                  let views = '';
+                  const viewEls = article.querySelectorAll('a[aria-label*="View"], span[aria-label*="View"]');
+                  for (const el of viewEls) {
+                    const label = el.getAttribute('aria-label');
+                    if (label && /view/i.test(label)) {
+                      views = extractNumber(label);
+                      break;
+                    }
+                  }
+
+                  bookmarks.push({
+                    url,
+                    text,
+                    displayName,
+                    username,
+                    dateTime,
+                    likes,
+                    retweets,
+                    replies,
+                    views
+                  });
+                } catch (err) {
+                  console.error('[X Extractor] Error extracting bookmark:', err);
+                }
+              });
+
+              return bookmarks;
+            };
+
+            // Scroll and extract progressively
             while (scrollAttempts < maxAttempts) {
+              // Extract bookmarks at current scroll position
+              const currentBookmarks = extractCurrentBookmarks();
+              currentBookmarks.forEach(bookmark => {
+                allBookmarks.set(bookmark.url, bookmark);
+              });
+
+              // Send progress update
+              console.log(`[X Extractor] Extracted ${allBookmarks.size} bookmarks so far...`);
+
+              // Scroll down
               window.scrollTo(0, document.body.scrollHeight);
               await new Promise(r => setTimeout(r, scrollDelay));
 
@@ -594,12 +708,21 @@ class PopupController {
               lastHeight = newHeight;
             }
 
-            window.scrollTo(0, 0);
-            await new Promise(r => setTimeout(r, postScrollDelay));
+            // Final extraction at the bottom
+            const finalBookmarks = extractCurrentBookmarks();
+            finalBookmarks.forEach(bookmark => {
+              allBookmarks.set(bookmark.url, bookmark);
+            });
+
+            // Return all extracted bookmarks
+            return {
+              success: true,
+              bookmarks: Array.from(allBookmarks.values()),
+              count: allBookmarks.size
+            };
           };
 
-          await scrollAndWait();
-          return { success: true };
+          return await progressiveScanAndScroll();
         }
       }, (results) => {
         // Check for errors
@@ -608,26 +731,18 @@ class PopupController {
           return;
         }
 
-        // After scrolling completes successfully, scan all loaded bookmarks
-        this.updateStatus('✓ Auto-scroll complete. Now scanning all loaded bookmarks...');
-        setTimeout(() => {
-          // Scan after auto-scroll - this is NOT a quick scan
-          chrome.tabs.query({active: true, currentWindow: true}, tabs => {
-            chrome.tabs.sendMessage(tabs[0].id, {
-              action: 'scanBookmarks'
-            }, (response) => {
-              if (chrome.runtime.lastError) {
-                this.updateStatus('Error: Could not connect to page. Please refresh and try again.');
-                return;
-              }
-              if (response && response.success) {
-                this.handleScanComplete(response.tweets || [], response.performance, false);
-              } else {
-                this.updateStatus('Error: Failed to scan bookmarks.');
-              }
-            });
-          });
-        }, this.constants.POST_SCAN_DELAY);
+        if (!results || !results[0] || !results[0].result) {
+          this.updateStatus('Error: Failed to extract bookmarks.');
+          return;
+        }
+
+        const result = results[0].result;
+        if (result.success && result.bookmarks) {
+          this.updateStatus(`✓ Successfully extracted ${result.count} bookmark${result.count !== 1 ? 's' : ''}!`);
+          this.handleScanComplete(result.bookmarks, { duration: 0, tweetsExtracted: result.count }, false);
+        } else {
+          this.updateStatus('Error: Failed to scan bookmarks.');
+        }
       });
     });
   };
@@ -1274,46 +1389,86 @@ class PopupController {
     this.updateStatus('Downloaded CSV file!');
   };
 
-  copyToClipboard = () => {
-    const md = this.generateMarkdown();
-    if (!md) {
+  copyToClipboard = async () => {
+    console.log('[Clipboard] Copy button clicked');
+
+    // Check if we have bookmarks to copy
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      console.warn('[Clipboard] No bookmarks in state');
       this.updateStatus('⚠️ No bookmarks to copy. Please scan bookmarks first.');
       return;
     }
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(md)
-        .then(() => {
-          this.updateStatus(`✓ Copied ${this.state.lastExtraction.length} bookmark${this.state.lastExtraction.length !== 1 ? 's' : ''} to clipboard!`);
-        })
-        .catch(err => {
-          console.error('Clipboard error:', err);
-          this.fallbackCopyToClipboard(md);
-        });
-    } else {
+    console.log(`[Clipboard] State has ${this.state.lastExtraction.length} bookmarks`);
+
+    const md = this.generateMarkdown();
+    if (!md || md.trim() === '') {
+      console.error('[Clipboard] generateMarkdown returned empty string');
+      this.updateStatus('⚠️ No content to copy. Please scan bookmarks first.');
+      return;
+    }
+
+    const bookmarkCount = this.state.lastExtraction.length;
+    console.log(`[Clipboard] Generated markdown: ${md.length} characters`);
+    console.log(`[Clipboard] First 200 chars:`, md.substring(0, 200));
+    console.log(`[Clipboard] Attempting to copy ${bookmarkCount} bookmarks`);
+
+    try {
+      // Try modern Clipboard API first
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        console.log('[Clipboard] Using Clipboard API');
+        await navigator.clipboard.writeText(md);
+        this.updateStatus(`✓ Copied ${bookmarkCount} bookmark${bookmarkCount !== 1 ? 's' : ''} to clipboard! (${Math.round(md.length/1024)}KB)`);
+        console.log('[Clipboard] ✓ Successfully copied using Clipboard API');
+
+        // Verify it was actually copied
+        try {
+          const clipboardContent = await navigator.clipboard.readText();
+          console.log(`[Clipboard] Verified clipboard has ${clipboardContent.length} characters`);
+        } catch (readErr) {
+          console.warn('[Clipboard] Could not verify clipboard (permission denied):', readErr.message);
+        }
+      } else {
+        // Fallback to legacy method
+        console.log('[Clipboard] Clipboard API not available, using fallback');
+        this.fallbackCopyToClipboard(md);
+      }
+    } catch (err) {
+      console.error('[Clipboard] Error copying to clipboard:', err);
+      console.error('[Clipboard] Error name:', err.name);
+      console.error('[Clipboard] Error message:', err.message);
+      // Try fallback method
       this.fallbackCopyToClipboard(md);
     }
   };
 
   fallbackCopyToClipboard = (text) => {
+    console.log('[Clipboard] Attempting fallback copy method');
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.style.position = 'fixed';
     textarea.style.opacity = '0';
+    textarea.style.left = '-9999px';
     document.body.appendChild(textarea);
+    textarea.focus();
     textarea.select();
+
     try {
       const successful = document.execCommand('copy');
       if (successful) {
-        this.updateStatus(`✓ Copied ${this.state.lastExtraction.length} bookmark${this.state.lastExtraction.length !== 1 ? 's' : ''} to clipboard!`);
+        const count = this.state.lastExtraction ? this.state.lastExtraction.length : 0;
+        this.updateStatus(`✓ Copied ${count} bookmark${count !== 1 ? 's' : ''} to clipboard!`);
+        console.log('[Clipboard] Successfully copied using fallback method');
       } else {
+        console.error('[Clipboard] execCommand copy returned false');
         this.updateStatus('⚠️ Failed to copy. Please try using a download option instead.');
       }
     } catch (err) {
-      console.error('Fallback copy failed:', err);
+      console.error('[Clipboard] Fallback copy failed:', err);
       this.updateStatus('⚠️ Clipboard copy failed. Please try using a download option instead.');
+    } finally {
+      document.body.removeChild(textarea);
     }
-    document.body.removeChild(textarea);
   };
 
   openBookmarksPage = () => {
