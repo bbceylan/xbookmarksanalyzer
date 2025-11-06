@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bookmark Reading Tests</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #1DA1F2;
+    }
+    .test-section {
+      background: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .test-result {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    .pass {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .fail {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    button {
+      background: #1DA1F2;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 9999px;
+      cursor: pointer;
+      font-weight: 600;
+      margin: 5px;
+    }
+    button:hover {
+      background: #1a8cd8;
+    }
+    pre {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>📚 X Bookmarks Analyzer - Reading Tests</h1>
+
+  <div class="test-section">
+    <h2>🧪 Test 1: Number Parsing with K/M/B Abbreviations</h2>
+    <button onclick="testNumberParsing()">Run Tests</button>
+    <div id="number-parsing-results"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>🧪 Test 2: Bookmark URL Validation</h2>
+    <button onclick="testValidation()">Run Tests</button>
+    <div id="validation-results"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>🧪 Test 3: Bookmark Deduplication</h2>
+    <button onclick="testDeduplication()">Run Tests</button>
+    <div id="deduplication-results"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>📊 Summary</h2>
+    <div id="summary"></div>
+  </div>
+
+  <script>
+    // Test implementations
+    let totalTests = 0;
+    let passedTests = 0;
+
+    // Copy of the extractNumber function from content-script.js
+    function extractNumber(text) {
+      if (!text) return '';
+
+      // Match numbers with K/M/B abbreviations
+      const abbreviationMatch = text.match(/([\d,.]+)\s*([KMBkmb])/);
+      if (abbreviationMatch) {
+        const num = parseFloat(abbreviationMatch[1].replace(/,/g, ''));
+        const suffix = abbreviationMatch[2].toUpperCase();
+
+        const multipliers = {
+          'K': 1000,
+          'M': 1000000,
+          'B': 1000000000
+        };
+
+        const result = num * (multipliers[suffix] || 1);
+        return Math.round(result).toString();
+      }
+
+      // Match plain numbers
+      const numberMatch = text.match(/([\d,.]+)/);
+      return numberMatch ? numberMatch[1].replace(/,/g, '') : '';
+    }
+
+    // Copy of validateBookmarkData function
+    function validateBookmarkData(bookmark) {
+      if (!bookmark || typeof bookmark !== 'object') {
+        return { valid: false, error: 'Invalid bookmark object' };
+      }
+
+      if (!bookmark.url || typeof bookmark.url !== 'string' || bookmark.url.trim() === '') {
+        return { valid: false, error: 'Missing or invalid URL' };
+      }
+
+      if (!bookmark.url.match(/(?:x\.com|twitter\.com)\/[^\/]+\/status\/\d+/)) {
+        return { valid: false, error: 'Invalid X/Twitter URL format' };
+      }
+
+      return { valid: true, error: null };
+    }
+
+    function testNumberParsing() {
+      const results = document.getElementById('number-parsing-results');
+      results.innerHTML = '';
+
+      const testCases = [
+        { input: '1.2K', expected: '1200', description: 'Decimal with K' },
+        { input: '3.5M', expected: '3500000', description: 'Decimal with M' },
+        { input: '1B', expected: '1000000000', description: 'Integer with B' },
+        { input: '500', expected: '500', description: 'Plain number' },
+        { input: '1,234', expected: '1234', description: 'Number with commas' },
+        { input: '15.7k', expected: '15700', description: 'Lowercase k' },
+        { input: '2.3m', expected: '2300000', description: 'Lowercase m' },
+        { input: '42K', expected: '42000', description: 'Integer with K' },
+        { input: '', expected: '', description: 'Empty string' },
+        { input: 'No numbers', expected: '', description: 'No numbers' }
+      ];
+
+      testCases.forEach(test => {
+        totalTests++;
+        const result = extractNumber(test.input);
+        const passed = result === test.expected;
+
+        if (passed) passedTests++;
+
+        results.innerHTML += `
+          <div class="test-result ${passed ? 'pass' : 'fail'}">
+            ${passed ? '✓' : '✗'} ${test.description}<br>
+            Input: "${test.input}" → Output: "${result}" (Expected: "${test.expected}")
+          </div>
+        `;
+      });
+    }
+
+    function testValidation() {
+      const results = document.getElementById('validation-results');
+      results.innerHTML = '';
+
+      const testCases = [
+        {
+          bookmark: { url: 'https://x.com/user123/status/1234567890' },
+          expected: true,
+          description: 'Valid X.com URL'
+        },
+        {
+          bookmark: { url: 'https://twitter.com/user123/status/1234567890' },
+          expected: true,
+          description: 'Valid Twitter.com URL'
+        },
+        {
+          bookmark: { url: 'https://example.com/page' },
+          expected: false,
+          description: 'Invalid URL (not X/Twitter)'
+        },
+        {
+          bookmark: { url: '' },
+          expected: false,
+          description: 'Empty URL'
+        },
+        {
+          bookmark: {},
+          expected: false,
+          description: 'Missing URL'
+        },
+        {
+          bookmark: null,
+          expected: false,
+          description: 'Null bookmark'
+        },
+        {
+          bookmark: { url: 'https://x.com/user123' },
+          expected: false,
+          description: 'URL without status'
+        }
+      ];
+
+      testCases.forEach(test => {
+        totalTests++;
+        const result = validateBookmarkData(test.bookmark);
+        const passed = result.valid === test.expected;
+
+        if (passed) passedTests++;
+
+        results.innerHTML += `
+          <div class="test-result ${passed ? 'pass' : 'fail'}">
+            ${passed ? '✓' : '✗'} ${test.description}<br>
+            Valid: ${result.valid} (Expected: ${test.expected})
+            ${!result.valid ? `<br>Error: ${result.error}` : ''}
+          </div>
+        `;
+      });
+    }
+
+    function testDeduplication() {
+      const results = document.getElementById('deduplication-results');
+      results.innerHTML = '';
+
+      // Simulate the deduplication logic from loadLastExtraction
+      const bookmarks1 = [
+        { url: 'https://x.com/user/status/123', text: 'Tweet 1', savedAt: '2024-01-01' },
+        { url: 'https://x.com/user/status/456', text: 'Tweet 2', savedAt: '2024-01-02' }
+      ];
+
+      const bookmarks2 = [
+        { url: 'https://x.com/user/status/123', text: 'Tweet 1 Updated', savedAt: '2024-01-03' },
+        { url: 'https://x.com/user/status/789', text: 'Tweet 3', savedAt: '2024-01-04' }
+      ];
+
+      let allBookmarks = [...bookmarks1, ...bookmarks2];
+
+      // Deduplication logic
+      const uniqueBookmarks = [];
+      const seenUrls = new Set();
+
+      allBookmarks.sort((a, b) => {
+        const dateA = new Date(a.savedAt || a.dateTime || 0);
+        const dateB = new Date(b.savedAt || b.dateTime || 0);
+        return dateB - dateA;
+      });
+
+      for (const bookmark of allBookmarks) {
+        if (bookmark.url && !seenUrls.has(bookmark.url)) {
+          uniqueBookmarks.push(bookmark);
+          seenUrls.add(bookmark.url);
+        }
+      }
+
+      totalTests++;
+      const testPassed = uniqueBookmarks.length === 3;
+      if (testPassed) passedTests++;
+
+      results.innerHTML += `
+        <div class="test-result ${testPassed ? 'pass' : 'fail'}">
+          ${testPassed ? '✓' : '✗'} Deduplication Test<br>
+          Input: 4 bookmarks (2 duplicates)<br>
+          Output: ${uniqueBookmarks.length} unique bookmarks (Expected: 3)<br>
+          <pre>${JSON.stringify(uniqueBookmarks, null, 2)}</pre>
+        </div>
+      `;
+
+      // Test that most recent version is kept
+      totalTests++;
+      const duplicateKept = uniqueBookmarks.find(b => b.url === 'https://x.com/user/status/123');
+      const keptMostRecent = duplicateKept && duplicateKept.text === 'Tweet 1 Updated';
+      if (keptMostRecent) passedTests++;
+
+      results.innerHTML += `
+        <div class="test-result ${keptMostRecent ? 'pass' : 'fail'}">
+          ${keptMostRecent ? '✓' : '✗'} Most Recent Version Kept<br>
+          Kept: "${duplicateKept ? duplicateKept.text : 'none'}" (Expected: "Tweet 1 Updated")
+        </div>
+      `;
+    }
+
+    function updateSummary() {
+      const summary = document.getElementById('summary');
+      const percentage = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
+
+      summary.innerHTML = `
+        <h3>Results: ${passedTests} / ${totalTests} tests passed (${percentage}%)</h3>
+        ${passedTests === totalTests ?
+          '<p style="color: green; font-weight: bold;">✓ All tests passed!</p>' :
+          '<p style="color: red; font-weight: bold;">✗ Some tests failed</p>'
+        }
+      `;
+    }
+
+    // Run all tests button
+    document.addEventListener('DOMContentLoaded', () => {
+      const summarySection = document.querySelector('#summary').parentElement;
+      const runAllBtn = document.createElement('button');
+      runAllBtn.textContent = 'Run All Tests';
+      runAllBtn.style.fontSize = '16px';
+      runAllBtn.style.padding = '15px 30px';
+      runAllBtn.onclick = () => {
+        totalTests = 0;
+        passedTests = 0;
+        testNumberParsing();
+        testValidation();
+        testDeduplication();
+        updateSummary();
+      };
+      summarySection.insertBefore(runAllBtn, summarySection.firstChild);
+    });
+  </script>
+</body>
+</html>

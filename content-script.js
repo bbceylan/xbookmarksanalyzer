@@ -95,8 +95,14 @@ class XBookmarkScanner {
       for (const article of articles) {
         const tweetData = this.extractTweetData(article);
         if (tweetData.url) {
-          foundUrls.add(tweetData.url);
-          tweets.push(tweetData);
+          // Validate bookmark data before adding
+          const validation = this.validateBookmarkData(tweetData);
+          if (validation.valid) {
+            foundUrls.add(tweetData.url);
+            tweets.push(tweetData);
+          } else {
+            console.warn('[X Extractor] Invalid bookmark data:', validation.error, tweetData.url);
+          }
         }
       }
 
@@ -149,10 +155,11 @@ class XBookmarkScanner {
   // Extract data from a single article element (DRY principle)
   // PERFORMANCE OPTIMIZED: Cache selectors and batch queries
   extractTweetData(article) {
-    // URL - Priority extraction, exit early if no URL
-    const link = article.querySelector('a[href*="/status/"]');
-    const url = link ? link.href : '';
-    if (!url) return { url: '' };
+    try {
+      // URL - Priority extraction, exit early if no URL
+      const link = article.querySelector('a[href*="/status/"]');
+      const url = link ? link.href : '';
+      if (!url) return { url: '' };
 
     // Text - use array join for efficiency
     const textEls = article.querySelectorAll('[data-testid="tweetText"]');
@@ -226,25 +233,76 @@ class XBookmarkScanner {
       }
     }
 
-    return {
-      url,
-      text,
-      displayName,
-      username,
-      dateTime,
-      likes,
-      retweets,
-      replies,
-      views
-    };
+      return {
+        url,
+        text,
+        displayName,
+        username,
+        dateTime,
+        likes,
+        retweets,
+        replies,
+        views
+      };
+    } catch (error) {
+      console.error('[X Extractor] Error extracting tweet data:', error);
+      // Return minimal valid data on error
+      return {
+        url: '',
+        text: '',
+        displayName: '',
+        username: '',
+        dateTime: '',
+        likes: '',
+        retweets: '',
+        replies: '',
+        views: ''
+      };
+    }
   }
 
-  // PERFORMANCE HELPER: Extract numbers more efficiently
+  // PERFORMANCE HELPER: Extract numbers more efficiently and handle K/M/B abbreviations
   extractNumber(text) {
     if (!text) return '';
-    // Remove all non-digit characters except commas and dots
-    const match = text.match(/([\d,.]+)/);
-    return match ? match[1].replace(/,/g, '') : '';
+
+    // Match numbers with K/M/B abbreviations (e.g., "1.2K", "3.5M", "1B")
+    const abbreviationMatch = text.match(/([\d,.]+)\s*([KMBkmb])/);
+    if (abbreviationMatch) {
+      const num = parseFloat(abbreviationMatch[1].replace(/,/g, ''));
+      const suffix = abbreviationMatch[2].toUpperCase();
+
+      const multipliers = {
+        'K': 1000,
+        'M': 1000000,
+        'B': 1000000000
+      };
+
+      const result = num * (multipliers[suffix] || 1);
+      return Math.round(result).toString();
+    }
+
+    // Match plain numbers with commas (e.g., "1,234" or "1234")
+    const numberMatch = text.match(/([\d,.]+)/);
+    return numberMatch ? numberMatch[1].replace(/,/g, '') : '';
+  }
+
+  // Validate bookmark data before storing
+  validateBookmarkData(bookmark) {
+    if (!bookmark || typeof bookmark !== 'object') {
+      return { valid: false, error: 'Invalid bookmark object' };
+    }
+
+    // URL is required
+    if (!bookmark.url || typeof bookmark.url !== 'string' || bookmark.url.trim() === '') {
+      return { valid: false, error: 'Missing or invalid URL' };
+    }
+
+    // URL must be a valid X/Twitter status URL
+    if (!bookmark.url.match(/(?:x\.com|twitter\.com)\/[^\/]+\/status\/\d+/)) {
+      return { valid: false, error: 'Invalid X/Twitter URL format' };
+    }
+
+    return { valid: true, error: null };
   }
 
   // ============================================
@@ -531,6 +589,14 @@ class XBookmarkScanner {
 
   async saveToAnalyzer(tweetData, tags, notes) {
     try {
+      // Validate bookmark data before saving
+      const validation = this.validateBookmarkData(tweetData);
+      if (!validation.valid) {
+        console.error('[X Extractor] Invalid bookmark data:', validation.error);
+        this.showToast('Error: ' + validation.error, true);
+        return;
+      }
+
       // Get existing manual bookmarks
       const result = await chrome.storage.local.get('manualBookmarks');
       const manualBookmarks = result.manualBookmarks || [];
