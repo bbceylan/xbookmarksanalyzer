@@ -79,9 +79,12 @@ class PopupController {
       exportMdBtn: document.getElementById('exportMdBtn'),
       exportCsvBtn: document.getElementById('exportCsvBtn'),
       exportJsonBtn: document.getElementById('exportJsonBtn'),
+      exportHtmlBtn: document.getElementById('exportHtmlBtn'),
       copyClipboardBtn: document.getElementById('copyClipboardBtn'),
       searchInput: document.getElementById('searchInput'),
       filterBtn: document.getElementById('filterBtn'),
+      sortBtn: document.getElementById('sortBtn'),
+      duplicatesBtn: document.getElementById('duplicatesBtn'),
       metricsBtn: document.getElementById('metricsBtn'),
       mainContent: document.getElementById('mainContent'),
       closeBtn: document.getElementById('closeBtn'),
@@ -182,6 +185,7 @@ class PopupController {
     this.elements.exportMdBtn?.addEventListener('click', () => this.downloadMarkdown());
     this.elements.exportCsvBtn?.addEventListener('click', () => this.downloadCSV());
     this.elements.exportJsonBtn?.addEventListener('click', () => this.downloadJSON());
+    this.elements.exportHtmlBtn?.addEventListener('click', () => this.downloadHTML());
     this.elements.copyClipboardBtn?.addEventListener('click', () => this.copyToClipboard());
 
     // Search and filter
@@ -190,6 +194,8 @@ class PopupController {
       this.debouncedSearch();
     });
     this.elements.filterBtn?.addEventListener('click', () => this.showFilterDialog());
+    this.elements.sortBtn?.addEventListener('click', () => this.showSortDialog());
+    this.elements.duplicatesBtn?.addEventListener('click', () => this.detectDuplicates());
     this.elements.metricsBtn?.addEventListener('click', () => this.showMetricsDialog());
 
     // Settings and close
@@ -215,6 +221,7 @@ class PopupController {
     if (this.elements.exportMdBtn) this.elements.exportMdBtn.disabled = !hasData;
     if (this.elements.exportCsvBtn) this.elements.exportCsvBtn.disabled = !hasData;
     if (this.elements.exportJsonBtn) this.elements.exportJsonBtn.disabled = !hasData;
+    if (this.elements.exportHtmlBtn) this.elements.exportHtmlBtn.disabled = !hasData;
     if (this.elements.copyClipboardBtn) this.elements.copyClipboardBtn.disabled = !hasData;
     if (this.elements.analyzeAiBtn) this.elements.analyzeAiBtn.disabled = !hasData;
   };
@@ -1397,6 +1404,415 @@ class PopupController {
     }
     throw lastError;
   };
+
+  // ====== NEW FEATURES v0.9.0 ======
+
+  // FEATURE: Duplicate Detection
+  detectDuplicates = () => {
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      this.updateStatus('No bookmarks to check for duplicates.');
+      return;
+    }
+
+    const urlMap = new Map();
+    const duplicates = [];
+
+    this.state.lastExtraction.forEach((bookmark, index) => {
+      if (urlMap.has(bookmark.url)) {
+        duplicates.push({ original: urlMap.get(bookmark.url), duplicate: index, url: bookmark.url });
+      } else {
+        urlMap.set(bookmark.url, index);
+      }
+    });
+
+    if (duplicates.length === 0) {
+      this.updateStatus('No duplicates found! All bookmarks are unique.');
+      return;
+    }
+
+    // Show duplicates dialog
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = `Found ${duplicates.length} Duplicate(s)`;
+    dialogContent.appendChild(title);
+
+    const info = document.createElement('p');
+    info.style.cssText = 'color: var(--text-color); margin-bottom: 16px;';
+    info.textContent = 'The following bookmarks appear multiple times:';
+    dialogContent.appendChild(info);
+
+    const list = document.createElement('ul');
+    list.style.cssText = 'color: var(--text-color); max-height: 300px; overflow-y: auto;';
+    duplicates.forEach(dup => {
+      const li = document.createElement('li');
+      li.style.cssText = 'margin-bottom: 8px; word-break: break-all;';
+      li.textContent = `${dup.url.substring(0, 60)}...`;
+      list.appendChild(li);
+    });
+    dialogContent.appendChild(list);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;';
+
+    const removeDupsBtn = document.createElement('button');
+    removeDupsBtn.textContent = 'Remove Duplicates';
+    removeDupsBtn.style.cssText = 'padding: 8px 16px; border: none; background: var(--danger-color); color: white; border-radius: 4px; cursor: pointer;';
+    removeDupsBtn.addEventListener('click', () => {
+      this.removeDuplicates(duplicates);
+      document.body.removeChild(dialog);
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'padding: 8px 16px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    closeBtn.addEventListener('click', () => document.body.removeChild(dialog));
+
+    buttonContainer.appendChild(removeDupsBtn);
+    buttonContainer.appendChild(closeBtn);
+    dialogContent.appendChild(buttonContainer);
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    this.updateStatus(`Found ${duplicates.length} duplicate bookmark(s).`);
+  };
+
+  removeDuplicates = async (duplicates) => {
+    const indicesToRemove = new Set(duplicates.map(d => d.duplicate));
+    const uniqueBookmarks = this.state.lastExtraction.filter((_, index) => !indicesToRemove.has(index));
+
+    this.state.lastExtraction = uniqueBookmarks;
+    await chrome.storage.local.set({
+      lastExtraction: {
+        timestamp: Date.now(),
+        bookmarks: uniqueBookmarks
+      }
+    });
+
+    this.updateStatus(`Removed ${duplicates.length} duplicate(s). ${uniqueBookmarks.length} unique bookmarks remaining.`);
+    this.updateUI();
+  };
+
+  // FEATURE: Sort bookmarks by engagement metrics
+  sortBookmarks = (criteria) => {
+    if (!this.state.lastExtraction || this.state.lastExtraction.length === 0) {
+      this.updateStatus('No bookmarks to sort.');
+      return;
+    }
+
+    const bookmarksToSort = this.state.filteredBookmarks || this.state.lastExtraction;
+    let sorted = [...bookmarksToSort];
+
+    switch (criteria) {
+      case 'likes':
+        sorted.sort((a, b) => (parseInt(b.likes) || 0) - (parseInt(a.likes) || 0));
+        break;
+      case 'retweets':
+        sorted.sort((a, b) => (parseInt(b.retweets) || 0) - (parseInt(a.retweets) || 0));
+        break;
+      case 'replies':
+        sorted.sort((a, b) => (parseInt(b.replies) || 0) - (parseInt(a.replies) || 0));
+        break;
+      case 'views':
+        sorted.sort((a, b) => (parseInt(b.views) || 0) - (parseInt(a.views) || 0));
+        break;
+      case 'date':
+        sorted.sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+        break;
+      case 'engagement':
+        // Combined engagement score
+        sorted.sort((a, b) => {
+          const scoreA = (parseInt(a.likes) || 0) * 2 + (parseInt(a.retweets) || 0) * 3 + (parseInt(a.replies) || 0) * 1;
+          const scoreB = (parseInt(b.likes) || 0) * 2 + (parseInt(b.retweets) || 0) * 3 + (parseInt(b.replies) || 0) * 1;
+          return scoreB - scoreA;
+        });
+        break;
+      default:
+        break;
+    }
+
+    this.state.filteredBookmarks = sorted;
+    this.updateStatus(`Sorted by ${criteria}.`);
+  };
+
+  // FEATURE: Show sort dialog
+  showSortDialog = () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    `;
+
+    const dialogContent = document.createElement('div');
+    dialogContent.style.cssText = `
+      background: var(--bg-color); padding: 24px; border-radius: 8px;
+      max-width: 350px; width: 90%;
+    `;
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin-top: 0; color: var(--text-color);';
+    title.textContent = 'Sort Bookmarks';
+    dialogContent.appendChild(title);
+
+    const sortOptions = [
+      { value: 'engagement', label: 'Total Engagement (Likes + Retweets + Replies)' },
+      { value: 'likes', label: 'Most Likes' },
+      { value: 'retweets', label: 'Most Retweets' },
+      { value: 'replies', label: 'Most Replies' },
+      { value: 'views', label: 'Most Views' },
+      { value: 'date', label: 'Most Recent' }
+    ];
+
+    sortOptions.forEach(option => {
+      const btn = document.createElement('button');
+      btn.textContent = option.label;
+      btn.style.cssText = `
+        width: 100%; padding: 12px; margin-bottom: 8px; border: 1px solid var(--border-color);
+        background: var(--bg-color); color: var(--text-color); border-radius: 4px;
+        cursor: pointer; text-align: left; transition: background 0.2s;
+      `;
+      btn.addEventListener('mouseover', () => {
+        btn.style.background = 'var(--hover-color)';
+      });
+      btn.addEventListener('mouseout', () => {
+        btn.style.background = 'var(--bg-color)';
+      });
+      btn.addEventListener('click', () => {
+        this.sortBookmarks(option.value);
+        document.body.removeChild(dialog);
+      });
+      dialogContent.appendChild(btn);
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'width: 100%; padding: 12px; margin-top: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 4px; cursor: pointer;';
+    cancelBtn.addEventListener('click', () => document.body.removeChild(dialog));
+    dialogContent.appendChild(cancelBtn);
+
+    dialog.appendChild(dialogContent);
+    document.body.appendChild(dialog);
+
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) document.body.removeChild(dialog);
+    });
+  };
+
+  // FEATURE: HTML Export with styling
+  generateHTML = () => {
+    const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
+    if (!bookmarks || bookmarks.length === 0) return '';
+
+    const stats = this.calculateBasicStats(bookmarks);
+    const analysis = this.state.aiAnalysis;
+
+    let html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X Bookmarks Export - ${new Date().toLocaleDateString()}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; background: white; padding: 40px;
+                 border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #1d9bf0; margin-bottom: 10px; font-size: 32px; }
+    h2 { color: #14171a; margin: 30px 0 15px; font-size: 24px; border-bottom: 2px solid #1d9bf0; padding-bottom: 8px; }
+    h3 { color: #14171a; margin: 20px 0 10px; font-size: 18px; }
+    .header { text-align: center; margin-bottom: 40px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+             gap: 15px; margin: 20px 0; }
+    .stat-card { background: #f7f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #1d9bf0; }
+    .stat-label { font-size: 12px; color: #657786; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 24px; font-weight: bold; color: #14171a; margin-top: 5px; }
+    .bookmark { background: #fff; border: 1px solid #e1e8ed; border-radius: 8px;
+                padding: 20px; margin-bottom: 15px; transition: box-shadow 0.2s; }
+    .bookmark:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .bookmark-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px; }
+    .author { font-weight: bold; color: #14171a; font-size: 16px; }
+    .username { color: #657786; font-size: 14px; margin-left: 5px; }
+    .date { color: #657786; font-size: 13px; }
+    .text { color: #14171a; margin: 12px 0; font-size: 15px; line-height: 1.5; }
+    .metrics { display: flex; gap: 20px; margin-top: 12px; flex-wrap: wrap; }
+    .metric { display: flex; align-items: center; gap: 5px; color: #657786; font-size: 13px; }
+    .metric-value { font-weight: 600; color: #14171a; }
+    .link { color: #1d9bf0; text-decoration: none; word-break: break-all; font-size: 13px; }
+    .link:hover { text-decoration: underline; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0; }
+    .tag { background: #1d9bf0; color: white; padding: 5px 15px; border-radius: 20px;
+           font-size: 12px; font-weight: 500; }
+    .categories { list-style: none; }
+    .categories li { padding: 8px 0; color: #14171a; border-bottom: 1px solid #e1e8ed; }
+    .categories li:last-child { border-bottom: none; }
+    .summary { background: #e8f5fd; padding: 20px; border-radius: 8px; margin: 20px 0;
+               border-left: 4px solid #1d9bf0; color: #14171a; line-height: 1.6; }
+    .footer { text-align: center; margin-top: 40px; padding-top: 20px;
+              border-top: 1px solid #e1e8ed; color: #657786; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📚 X Bookmarks Export</h1>
+      <p style="color: #657786; margin-top: 10px;">Generated on ${new Date().toLocaleString()}</p>
+      <p style="color: #657786;">Total Bookmarks: ${bookmarks.length}</p>
+    </div>
+`;
+
+    // Analysis section
+    if (analysis) {
+      html += `
+    <h2>📊 AI Analysis</h2>
+    <div class="summary">${this.escapeHtml(analysis.overallSummary || 'No summary available.')}</div>
+`;
+
+      if (analysis.tags && analysis.tags.length > 0) {
+        html += `
+    <h3>🏷️ Tags</h3>
+    <div class="tags">
+      ${analysis.tags.map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join('')}
+    </div>
+`;
+      }
+
+      if (analysis.categories && analysis.categories.length > 0) {
+        html += `
+    <h3>📁 Categories</h3>
+    <ul class="categories">
+      ${analysis.categories.map(cat => `<li>${this.escapeHtml(cat)}</li>`).join('')}
+    </ul>
+`;
+      }
+    }
+
+    // Statistics
+    html += `
+    <h2>📈 Statistics</h2>
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-label">Total Likes</div>
+        <div class="stat-value">${stats.totalLikes.toLocaleString()}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Retweets</div>
+        <div class="stat-value">${stats.totalRetweets.toLocaleString()}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg Likes/Bookmark</div>
+        <div class="stat-value">${Math.round(stats.avgLikes)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Top Author</div>
+        <div class="stat-value" style="font-size: 18px;">@${stats.topAuthor.username || 'N/A'}</div>
+      </div>
+    </div>
+`;
+
+    // Bookmarks
+    html += `
+    <h2>🔖 Bookmarks</h2>
+`;
+
+    bookmarks.forEach((b, index) => {
+      html += `
+    <div class="bookmark">
+      <div class="bookmark-header">
+        <div>
+          <span class="author">${this.escapeHtml(b.displayName || 'Unknown')}</span>
+          <span class="username">@${this.escapeHtml(b.username || 'unknown')}</span>
+        </div>
+        <div class="date">${b.dateTime ? new Date(b.dateTime).toLocaleDateString() : 'N/A'}</div>
+      </div>
+      <div class="text">${this.escapeHtml(b.text || '(No text)')}</div>
+      <div class="metrics">
+        ${b.likes ? `<div class="metric">❤️ <span class="metric-value">${b.likes}</span></div>` : ''}
+        ${b.retweets ? `<div class="metric">🔄 <span class="metric-value">${b.retweets}</span></div>` : ''}
+        ${b.replies ? `<div class="metric">💬 <span class="metric-value">${b.replies}</span></div>` : ''}
+        ${b.views ? `<div class="metric">👁️ <span class="metric-value">${b.views}</span></div>` : ''}
+      </div>
+      <a href="${b.url}" target="_blank" class="link">View on X →</a>
+    </div>
+`;
+    });
+
+    html += `
+    <div class="footer">
+      <p>Exported with X Bookmarks Analyzer v0.9.0</p>
+      <p>Total bookmarks in this export: ${bookmarks.length}</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    return html;
+  };
+
+  escapeHtml = (text) => {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  };
+
+  downloadHTML = () => {
+    const html = this.generateHTML();
+    if (!html) {
+      this.updateStatus('No bookmarks to export.');
+      return;
+    }
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `x-bookmarks-${Date.now()}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this.updateStatus('Downloaded HTML file!');
+  };
+
+  // FEATURE: Auto-save bookmarks
+  enableAutoSave = (intervalMinutes = 5) => {
+    if (this.autoSaveTimer) {
+      clearInterval(this.autoSaveTimer);
+    }
+
+    this.autoSaveTimer = setInterval(async () => {
+      if (this.state.lastExtraction && this.state.lastExtraction.length > 0) {
+        await chrome.storage.local.set({
+          lastExtraction: {
+            timestamp: Date.now(),
+            bookmarks: this.state.lastExtraction
+          },
+          autoSaveTime: new Date().toISOString()
+        });
+        console.log('[Auto-save] Bookmarks saved automatically');
+      }
+    }, intervalMinutes * 60 * 1000);
+
+    console.log(`[Auto-save] Enabled with ${intervalMinutes} minute interval`);
+  };
+
+  // ====== END NEW FEATURES ======
 }
 
 // LLM Provider Base Class

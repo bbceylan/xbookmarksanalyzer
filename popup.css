@@ -3,11 +3,14 @@
 :root {
   --primary-color: #1DA1F2;
   --danger-color: #F4212E;
+  --success-color: #00BA7C;
+  --warning-color: #FFAD1F;
   --text-color: #0F1419;
   --bg-color: #FFFFFF;
   --border-color: #CFD9DE;
   --disabled-color: #536471;
   --hover-bg: rgba(29, 161, 242, 0.1);
+  --hover-color: #f7f9fa;
 }
 
 /* Dark Mode Theme */
@@ -16,6 +19,7 @@
   --bg-color: #15202B;
   --border-color: #38444D;
   --hover-bg: rgba(239, 243, 244, 0.1);
+  --hover-color: #1c2732;
   --header-bg: #15202B;
   --header-border: #22303C;
   --header-text: #ffffff;
