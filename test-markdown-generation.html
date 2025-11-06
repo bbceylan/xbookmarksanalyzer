@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Markdown Generation</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px 5px;
+      cursor: pointer;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 5px;
+      background: #e3f2fd;
+    }
+  </style>
+</head>
+<body>
+  <h1>Test Markdown Generation</h1>
+
+  <button onclick="testGeneration()">Generate Markdown</button>
+  <button onclick="copyMarkdown()">Copy to Clipboard</button>
+  <button onclick="downloadMarkdown()">Download MD File</button>
+
+  <div id="status" class="status"></div>
+
+  <h2>Generated Markdown:</h2>
+  <pre id="output"></pre>
+
+  <script>
+    // Mock state object
+    const state = {
+      lastExtraction: [
+        {
+          text: "This is a test tweet about JavaScript and web development. Really useful content!",
+          displayName: "John Doe",
+          username: "johndoe",
+          url: "https://x.com/johndoe/status/123456789",
+          likes: "150",
+          retweets: "25",
+          replies: "10",
+          views: "1500",
+          dateTime: new Date().toISOString()
+        },
+        {
+          text: "Another amazing tweet about coding best practices and clean code principles.",
+          displayName: "Jane Smith",
+          username: "janesmith",
+          url: "https://x.com/janesmith/status/987654321",
+          likes: "200",
+          retweets: "50",
+          replies: "15",
+          views: "2000",
+          dateTime: new Date().toISOString()
+        },
+        {
+          text: "Check out this tutorial on React hooks! #reactjs #webdev",
+          displayName: "Tech Guru",
+          username: "techguru",
+          url: "https://x.com/techguru/status/555555555",
+          likes: "300",
+          retweets: "75",
+          replies: "20",
+          views: "3500",
+          dateTime: new Date().toISOString()
+        }
+      ],
+      aiAnalysis: {
+        tags: ["javascript", "webdev", "programming", "react", "coding"]
+      },
+      bookmarkMetadata: {}
+    };
+
+    function getCustomTags(url) {
+      return state.bookmarkMetadata[url]?.customTags || [];
+    }
+
+    function generateMarkdown() {
+      const bookmarks = state.lastExtraction;
+      if (!bookmarks || bookmarks.length === 0) return '';
+
+      const exportDate = new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+
+      // Use array for better performance
+      const mdParts = [
+        `# X Bookmarks Export\n\n`,
+        `**Exported:** ${exportDate}\n`,
+        `**Total Bookmarks:** ${bookmarks.length}\n\n`,
+        `---\n\n`
+      ];
+
+      // Process bookmarks with simplified format
+      bookmarks.forEach((bookmark, index) => {
+        mdParts.push(`## Bookmark ${index + 1}\n\n`);
+
+        // Tweet text
+        if (bookmark.text) {
+          mdParts.push(`**Text:** ${bookmark.text}\n\n`);
+        }
+
+        // Tweet owner
+        const ownerName = bookmark.displayName || 'Unknown';
+        const ownerHandle = bookmark.username ? `@${bookmark.username}` : '@unknown';
+        mdParts.push(`**Owner:** ${ownerName} (${ownerHandle})\n\n`);
+
+        // Category tags (max 5)
+        const tags = [];
+
+        // First, check for custom tags for this specific bookmark
+        const customTags = getCustomTags(bookmark.url);
+        if (customTags && customTags.length > 0) {
+          tags.push(...customTags.slice(0, 5));
+        }
+
+        // If no custom tags or less than 5, add from AI analysis
+        if (tags.length < 5 && state.aiAnalysis && state.aiAnalysis.tags) {
+          const remainingSlots = 5 - tags.length;
+          const aiTags = state.aiAnalysis.tags.slice(0, remainingSlots);
+          tags.push(...aiTags);
+        }
+
+        if (tags.length > 0) {
+          mdParts.push(`**Tags:** ${tags.join(', ')}\n\n`);
+        }
+
+        // Link
+        mdParts.push(`**Link:** ${bookmark.url}\n\n`);
+        mdParts.push(`---\n\n`);
+      });
+
+      return mdParts.join('');
+    }
+
+    let generatedMarkdown = '';
+
+    function testGeneration() {
+      console.log('Starting markdown generation...');
+      generatedMarkdown = generateMarkdown();
+      console.log('Generated markdown length:', generatedMarkdown.length);
+
+      const output = document.getElementById('output');
+      const status = document.getElementById('status');
+
+      if (generatedMarkdown && generatedMarkdown.length > 0) {
+        output.textContent = generatedMarkdown;
+        status.textContent = `✓ Generated ${generatedMarkdown.length} characters of markdown from ${state.lastExtraction.length} bookmarks`;
+        status.style.background = '#c8e6c9';
+        console.log('First 200 chars:', generatedMarkdown.substring(0, 200));
+      } else {
+        output.textContent = 'ERROR: Generated markdown is empty!';
+        status.textContent = '✗ Failed to generate markdown';
+        status.style.background = '#ffcdd2';
+        console.error('Markdown generation returned empty string');
+      }
+    }
+
+    async function copyMarkdown() {
+      if (!generatedMarkdown) {
+        testGeneration();
+      }
+
+      const status = document.getElementById('status');
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(generatedMarkdown);
+          status.textContent = `✓ Copied ${generatedMarkdown.length} characters to clipboard!`;
+          status.style.background = '#c8e6c9';
+          console.log('Successfully copied to clipboard');
+
+          // Verify
+          const clipContent = await navigator.clipboard.readText();
+          console.log('Verified clipboard has', clipContent.length, 'characters');
+        } else {
+          throw new Error('Clipboard API not available');
+        }
+      } catch (err) {
+        console.error('Clipboard error:', err);
+        status.textContent = `✗ Clipboard error: ${err.message}. Try the download button instead.`;
+        status.style.background = '#ffcdd2';
+      }
+    }
+
+    function downloadMarkdown() {
+      if (!generatedMarkdown) {
+        testGeneration();
+      }
+
+      const blob = new Blob([generatedMarkdown], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `x-bookmarks-test-${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      const status = document.getElementById('status');
+      status.textContent = '✓ Downloaded markdown file!';
+      status.style.background = '#c8e6c9';
+    }
+
+    // Auto-generate on page load
+    window.addEventListener('load', () => {
+      console.log('Page loaded, auto-generating markdown...');
+      testGeneration();
+    });
+  </script>
+</body>
+</html>

@@ -281,11 +281,27 @@ class PopupController {
     this.elements.analyzeAiBtn?.addEventListener('click', () => this.analyzeBookmarks());
 
     // Export buttons
-    this.elements.exportMdBtn?.addEventListener('click', () => this.downloadMarkdown());
-    this.elements.exportCsvBtn?.addEventListener('click', () => this.downloadCSV());
-    this.elements.exportJsonBtn?.addEventListener('click', () => this.downloadJSON());
-    this.elements.exportHtmlBtn?.addEventListener('click', () => this.downloadHTML());
-    this.elements.copyClipboardBtn?.addEventListener('click', () => this.copyToClipboard());
+    console.log('[Init] Setting up export button event listeners');
+    this.elements.exportMdBtn?.addEventListener('click', () => {
+      console.log('[Event] Export MD button clicked');
+      this.downloadMarkdown();
+    });
+    this.elements.exportCsvBtn?.addEventListener('click', () => {
+      console.log('[Event] Export CSV button clicked');
+      this.downloadCSV();
+    });
+    this.elements.exportJsonBtn?.addEventListener('click', () => {
+      console.log('[Event] Export JSON button clicked');
+      this.downloadJSON();
+    });
+    this.elements.exportHtmlBtn?.addEventListener('click', () => {
+      console.log('[Event] Export HTML button clicked');
+      this.downloadHTML();
+    });
+    this.elements.copyClipboardBtn?.addEventListener('click', () => {
+      console.log('[Event] Copy to clipboard button clicked');
+      this.copyToClipboard();
+    });
 
     // Search and filter
     this.elements.searchInput?.addEventListener('input', (e) => {
@@ -336,11 +352,19 @@ class PopupController {
 
   updateExportButtons = () => {
     const hasData = this.state.lastExtraction && this.state.lastExtraction.length > 0;
-    if (this.elements.exportMdBtn) this.elements.exportMdBtn.disabled = !hasData;
+    console.log('[UI] updateExportButtons called, hasData:', hasData, 'bookmark count:', this.state.lastExtraction ? this.state.lastExtraction.length : 0);
+
+    if (this.elements.exportMdBtn) {
+      this.elements.exportMdBtn.disabled = !hasData;
+      console.log('[UI] Export MD button disabled:', this.elements.exportMdBtn.disabled);
+    }
     if (this.elements.exportCsvBtn) this.elements.exportCsvBtn.disabled = !hasData;
     if (this.elements.exportJsonBtn) this.elements.exportJsonBtn.disabled = !hasData;
     if (this.elements.exportHtmlBtn) this.elements.exportHtmlBtn.disabled = !hasData;
-    if (this.elements.copyClipboardBtn) this.elements.copyClipboardBtn.disabled = !hasData;
+    if (this.elements.copyClipboardBtn) {
+      this.elements.copyClipboardBtn.disabled = !hasData;
+      console.log('[UI] Copy clipboard button disabled:', this.elements.copyClipboardBtn.disabled);
+    }
     if (this.elements.analyzeAiBtn) this.elements.analyzeAiBtn.disabled = !hasData;
     // NEW v0.10.0
     if (this.elements.exportNotionBtn) this.elements.exportNotionBtn.disabled = !hasData;
@@ -1186,8 +1210,14 @@ class PopupController {
   };
 
   generateMarkdown = () => {
+    console.log('[Markdown] generateMarkdown called');
     const bookmarks = this.state.filteredBookmarks || this.state.lastExtraction;
-    if (!bookmarks || bookmarks.length === 0) return '';
+    console.log('[Markdown] Bookmarks count:', bookmarks ? bookmarks.length : 0);
+
+    if (!bookmarks || bookmarks.length === 0) {
+      console.warn('[Markdown] No bookmarks to generate markdown from');
+      return '';
+    }
 
     const exportDate = new Date().toLocaleDateString('en-US', {
       year: 'numeric',
@@ -1202,6 +1232,8 @@ class PopupController {
       `**Total Bookmarks:** ${bookmarks.length}\n\n`,
       `---\n\n`
     ];
+
+    console.log('[Markdown] Starting to process', bookmarks.length, 'bookmarks');
 
     // Process bookmarks with simplified format
     bookmarks.forEach((bookmark, index) => {
@@ -1242,7 +1274,10 @@ class PopupController {
       mdParts.push(`---\n\n`);
     });
 
-    return mdParts.join('');
+    const result = mdParts.join('');
+    console.log('[Markdown] Generated', result.length, 'characters');
+    console.log('[Markdown] First 300 chars:', result.substring(0, 300));
+    return result;
   };
 
   calculateBasicStats = (bookmarks) => {
@@ -1349,18 +1384,35 @@ class PopupController {
   };
 
   downloadMarkdown = () => {
+    console.log('[Download] downloadMarkdown called');
+    console.log('[Download] State has bookmarks:', this.state.lastExtraction ? this.state.lastExtraction.length : 0);
+
     const md = this.generateMarkdown();
-    if (!md) return;
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `x-bookmarks-${Date.now()}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    this.updateStatus('Downloaded Markdown file!');
+
+    if (!md || md.trim() === '') {
+      console.error('[Download] generateMarkdown returned empty string');
+      this.updateStatus('⚠️ No content to download. Please scan bookmarks first.');
+      return;
+    }
+
+    console.log('[Download] Markdown generated, length:', md.length);
+
+    try {
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `x-bookmarks-${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      this.updateStatus(`✓ Downloaded Markdown file! (${Math.round(md.length/1024)}KB)`);
+      console.log('[Download] ✓ Download completed successfully');
+    } catch (err) {
+      console.error('[Download] Error during download:', err);
+      this.updateStatus(`✗ Download failed: ${err.message}`);
+    }
   };
 
   downloadCSV = () => {
