@@ -1,12 +1,20 @@
 # X Bookmarks Analyzer - Browser Extension
 
-![Version](https://img.shields.io/badge/version-0.12.0-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
+![Version](https://img.shields.io/badge/version-0.12.3-blue.svg) ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
 
 Extract, analyze, sort and manage your X (Twitter) bookmarks with powerful features. Proactive bookmark capture, author-centric analytics, media gallery, AI article summarization, multiple LLM providers, and comprehensive export options.
 
 ## 📋 Changelog
 
-### Version 0.12.0 (Beta) - Current - November 2025
+### Version 0.12.3 (Beta) - Current - November 2025
+#### 🎯 Export Improvements
+- **Simplified Markdown Export Format**: Clean, focused export format
+  - Each bookmark now shows: text, owner, tags (max 5), and link
+  - Removed verbose statistics and analysis sections from export
+  - Smart tag selection: uses custom tags first, falls back to AI-generated tags
+  - More readable and scannable format for better usability
+
+### Version 0.12.0 (Beta) - November 2025
 #### 🚀 Major New Features
 - **➕ Proactive "Add to Analyzer" Workflow**
   - Custom button injected directly onto X.com's UI on every tweet
@@ -187,13 +195,14 @@ Extract, analyze, sort and manage your X (Twitter) bookmarks with powerful featu
   - **Categories**: Identify 3-5 main categories your bookmarks fall into
   - **Automatic Analysis**: Analysis runs automatically after scanning
   - **Manual Control**: Trigger analysis on-demand with the "Analyze Bookmarks" button
-- **📝 Enhanced Exports**: Export your bookmarks with statistics and insights
-  - **Download as Markdown**: Beautifully formatted export with statistics, analysis, and individual bookmark sections
+- **📝 Enhanced Exports**: Export your bookmarks in a clean, focused format
+  - **Download as Markdown**: Clean export format with tweet text, owner, tags (max 5), and link for each bookmark
   - **Download as CSV**: Spreadsheet format with tags and categories columns
   - **Download as HTML**: Professional, styled HTML export with responsive design
   - **Download as JSON**: Structured data export with all metadata
-  - **Copy to Clipboard**: Copy formatted Markdown including all insights
+  - **Copy to Clipboard**: Copy formatted Markdown including all bookmarks
   - **Always Available**: Export works with or without analysis
+  - **Smart Tags**: Uses custom tags per bookmark if available, falls back to AI-generated tags
 - **🔍 Smart Organization**: Powerful tools to manage your bookmarks
   - **Search**: Real-time search by text, author, or username
   - **Filter**: Filter by engagement metrics (likes, retweets) and author
@@ -312,10 +321,11 @@ Extract, analyze, sort and manage your X (Twitter) bookmarks with powerful featu
    - LLM-free mode is instant, external providers may take a few seconds
 
 5. **Export or Copy**
-   - Click "Download .md" to save as a Markdown file (includes statistics and analysis)
+   - Click "Download .md" to save as a Markdown file (clean format with tweet text, owner, tags, and link for each bookmark)
    - Click "Download .csv" to save as a CSV file (includes tags and categories)
    - Or click "Copy to Clipboard" to copy the formatted Markdown
    - Export works immediately after scanning, even without analysis
+   - Tags are pulled from custom tags if available, otherwise from AI analysis (max 5 tags per bookmark)
 
 ## 🛠️ Development
 

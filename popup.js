@@ -1199,58 +1199,47 @@ class PopupController {
     const mdParts = [
       `# X Bookmarks Export\n\n`,
       `**Exported:** ${exportDate}\n`,
-      `**Total Bookmarks:** ${bookmarks.length}\n\n`
+      `**Total Bookmarks:** ${bookmarks.length}\n\n`,
+      `---\n\n`
     ];
 
-    // Add basic statistics
-    const stats = this.calculateBasicStats(bookmarks);
-    mdParts.push(
-      `## Statistics\n\n`,
-      `- **Total Engagement:** ${stats.totalLikes + stats.totalRetweets} interactions\n`,
-      `- **Average Likes:** ${Math.round(stats.avgLikes)}\n`,
-      `- **Top Author:** @${stats.topAuthor.username || 'N/A'} (${stats.topAuthor.count} bookmarks)\n`,
-      `- **Date Range:** ${stats.dateRange}\n\n`
-    );
-
-    // Add AI analysis if available
-    if (this.state.aiAnalysis) {
-      mdParts.push(`## Analysis\n\n`);
-      if (this.state.aiAnalysis.overallSummary) {
-        mdParts.push(`**Summary:** ${this.state.aiAnalysis.overallSummary}\n\n`);
-      }
-      if (this.state.aiAnalysis.tags && this.state.aiAnalysis.tags.length > 0) {
-        mdParts.push(`**Tags:** ${this.state.aiAnalysis.tags.join(', ')}\n\n`);
-      }
-      if (this.state.aiAnalysis.categories && this.state.aiAnalysis.categories.length > 0) {
-        mdParts.push(`**Categories:**\n${this.state.aiAnalysis.categories.map(c => `- ${c}`).join('\n')}\n\n`);
-      }
-      mdParts.push(`---\n\n`);
-    }
-
-    mdParts.push(`## Bookmarks\n\n`);
-
-    // Process bookmarks efficiently
+    // Process bookmarks with simplified format
     bookmarks.forEach((bookmark, index) => {
-      mdParts.push(
-        `### ${index + 1}. ${bookmark.displayName || 'Unknown'} (@${bookmark.username || 'unknown'})\n\n`
-      );
+      mdParts.push(`## Bookmark ${index + 1}\n\n`);
 
+      // Tweet text
       if (bookmark.text) {
-        mdParts.push(`${bookmark.text}\n\n`);
+        mdParts.push(`**Text:** ${bookmark.text}\n\n`);
       }
 
-      const statsParts = [`**Stats:** ${bookmark.likes || '0'} likes • ${bookmark.retweets || '0'} retweets • ${bookmark.replies || '0'} replies`];
-      if (bookmark.views) {
-        statsParts.push(` • ${bookmark.views} views`);
-      }
-      mdParts.push(statsParts.join(''), `\n\n`);
+      // Tweet owner
+      const ownerName = bookmark.displayName || 'Unknown';
+      const ownerHandle = bookmark.username ? `@${bookmark.username}` : '@unknown';
+      mdParts.push(`**Owner:** ${ownerName} (${ownerHandle})\n\n`);
 
-      if (bookmark.dateTime) {
-        const date = new Date(bookmark.dateTime);
-        mdParts.push(`**Date:** ${date.toLocaleString()}\n\n`);
+      // Category tags (max 5)
+      const tags = [];
+
+      // First, check for custom tags for this specific bookmark
+      const customTags = this.getCustomTags(bookmark.url);
+      if (customTags && customTags.length > 0) {
+        tags.push(...customTags.slice(0, 5));
       }
 
-      mdParts.push(`**Link:** ${bookmark.url}\n\n`, `---\n\n`);
+      // If no custom tags or less than 5, add from AI analysis
+      if (tags.length < 5 && this.state.aiAnalysis && this.state.aiAnalysis.tags) {
+        const remainingSlots = 5 - tags.length;
+        const aiTags = this.state.aiAnalysis.tags.slice(0, remainingSlots);
+        tags.push(...aiTags);
+      }
+
+      if (tags.length > 0) {
+        mdParts.push(`**Tags:** ${tags.join(', ')}\n\n`);
+      }
+
+      // Link
+      mdParts.push(`**Link:** ${bookmark.url}\n\n`);
+      mdParts.push(`---\n\n`);
     });
 
     return mdParts.join('');

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Bookmarks Analyzer",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Complete bookmark management solution for X (Twitter). Features: proactive 'Add to Analyzer' button, author-centric dashboard with topic analysis, media gallery view, AI article summarization, favorites, archives, bulk operations, reading queue, engagement tracking, sentiment analysis, and comprehensive exports to Markdown, CSV, JSON, HTML, Notion, and Obsidian.",
   "action": {
     "default_popup": "popup.html",
