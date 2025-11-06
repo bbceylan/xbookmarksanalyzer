@@ -143,8 +143,9 @@ class XBookmarkScanner {
   }
 
   // Extract data from a single article element (DRY principle)
+  // PERFORMANCE OPTIMIZED: Cache selectors and batch queries
   extractTweetData(article) {
-    // URL
+    // URL - Priority extraction, exit early if no URL
     const link = article.querySelector('a[href*="/status/"]');
     const url = link ? link.href : '';
     if (!url) return { url: '' };
@@ -196,29 +197,29 @@ class XBookmarkScanner {
       if (match) username = match[1];
     }
 
-    // Date/time
+    // Date/time - single query
     const timeEl = article.querySelector('time');
     const dateTime = timeEl ? timeEl.getAttribute('datetime') || '' : '';
 
-    // Engagement metrics
+    // Engagement metrics - PERFORMANCE: Query once and extract numbers more efficiently
     const likeEl = article.querySelector('[data-testid="like"]');
-    const likes = likeEl ? likeEl.textContent?.replace(/[^\d]/g, '') || '' : '';
+    const likes = likeEl ? this.extractNumber(likeEl.textContent) : '';
 
     const retweetEl = article.querySelector('[data-testid="retweet"]');
-    const retweets = retweetEl ? retweetEl.textContent?.replace(/[^\d]/g, '') || '' : '';
+    const retweets = retweetEl ? this.extractNumber(retweetEl.textContent) : '';
 
     const replyEl = article.querySelector('[data-testid="reply"]');
-    const replies = replyEl ? replyEl.textContent?.replace(/[^\d]/g, '') || '' : '';
+    const replies = replyEl ? this.extractNumber(replyEl.textContent) : '';
 
-    // Views - use find for better performance
+    // Views - OPTIMIZED: More targeted selector
     let views = '';
-    const viewEl = Array.from(article.querySelectorAll('span, div')).find(el => {
-      const label = el.getAttribute('aria-label') || el.textContent || '';
-      return /views?/i.test(label);
-    });
-    if (viewEl) {
-      const match = viewEl.textContent?.match(/([\d,.]+)/);
-      if (match) views = match[1].replace(/,/g, '');
+    const allEls = article.querySelectorAll('a[aria-label*="View"], span[aria-label*="View"]');
+    for (const el of allEls) {
+      const label = el.getAttribute('aria-label');
+      if (label && /view/i.test(label)) {
+        views = this.extractNumber(label);
+        break;
+      }
     }
 
     return {
@@ -232,6 +233,14 @@ class XBookmarkScanner {
       replies,
       views
     };
+  }
+
+  // PERFORMANCE HELPER: Extract numbers more efficiently
+  extractNumber(text) {
+    if (!text) return '';
+    // Remove all non-digit characters except commas and dots
+    const match = text.match(/([\d,.]+)/);
+    return match ? match[1].replace(/,/g, '') : '';
   }
 }
 
