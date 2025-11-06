@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "X Bookmarks Analyzer",
-  "version": "0.9.0",
-  "description": "Extract, search, filter, sort and analyze your X (Twitter) bookmarks with AI. Features: duplicate detection, engagement sorting, HTML export, multiple LLM providers, and performance optimizations.",
+  "version": "0.11.0",
+  "description": "Complete bookmark management solution for X (Twitter). Features: favorites, archives, bulk operations, reading queue, highlights, thread reader, engagement tracking, deleted tweet detection, author analytics, hidden gems finder, keyboard shortcuts, undo/redo, AI analysis, sentiment analysis, and comprehensive exports to Markdown, CSV, JSON, HTML, Notion, and Obsidian.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
